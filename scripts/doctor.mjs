@@ -22,6 +22,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const require_ = createRequire(import.meta.url);
+const channelPolicy = require_("../lib/channelPolicy.ts");
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -154,6 +158,39 @@ export function checkProgramConfig(loaded) {
  * nothing anywhere. That is the correct default for safety, and a silent
  * dead end for someone who wired everything else up and waits for a reply.
  */
+/**
+ * Runs the engine's own channel-role validator. This is the check the bot
+ * itself refuses to start on, so --doctor must run it too: without it,
+ * --doctor reports a clean config while the process crash-loops on
+ * "channel role configuration invalid" seconds later.
+ */
+export function checkChannelRoles(env = process.env) {
+  // lib/channelPolicy.validate() reads process.env directly, so apply the
+  // caller's env around the call. Without this the check is untestable and
+  // silently reports whatever the developer's own .env happens to say.
+  const saved = {};
+  const keys = ["SLACK_HELP_CHANNEL", "SLACK_FAQ_CHANNELS"];
+  for (const key of keys) {
+    saved[key] = process.env[key];
+    if (env[key] === undefined) delete process.env[key];
+    else process.env[key] = env[key];
+  }
+  let roles;
+  try {
+    roles = channelPolicy.validate();
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
+  if (roles && roles.ok) {
+    return result(PASS, "channel roles", "no channel carries a conflicting role");
+  }
+  const errors = (roles && roles.errors) || [];
+  return result(FAIL, "channel roles", `${errors.length} conflict(s): ` + errors.map((e) => `${e.channelId} - ${e.message}`).join("; "));
+}
+
 export function checkClaimedChannels(loaded) {
   if (!loaded.programs) return result(PASS, "claimed channels", "no program config to check");
   const idle = loaded.programs.filter((prog) => {
@@ -267,6 +304,7 @@ export function runDoctor(deps = {}) {
     checkRequiredEnv(d.env),
     checkProgramConfig(loaded),
     checkClaimedChannels(loaded),
+    checkChannelRoles(d.env),
     checkCorpusFiles(loaded, d),
     checkDashboardPasscode(d.env),
     checkDevClientId(d.env),

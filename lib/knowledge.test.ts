@@ -171,7 +171,14 @@ test("local path resolution stays inside the application root", () => {
 test("status sanitizes remote URLs", () => {
   const sourceStatus = knowledge.sourceStatus("missing-program");
   assert.deepEqual(sourceStatus, []);
-  assert.equal(fs.existsSync("config/programs.json"), false);
+});
+
+test("deployment program config is gitignored, never committed", () => {
+  // config/programs.json holds a real deployment's channel ids, so it exists
+  // locally but must never be tracked. Asserting the file is absent instead
+  // would break the moment anyone deploys, which is exactly backwards.
+  const ignore = fs.readFileSync(".gitignore", "utf8");
+  assert.match(ignore, /^config\/$/m);
 });
 
 export {};

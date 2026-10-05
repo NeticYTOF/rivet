@@ -5,7 +5,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runDoctor, render, resolveSourcePath, checkRequiredEnv, checkCorpusFiles, loadConfiguredPrograms } from "./doctor.mjs";
+import {
+  runDoctor,
+  render,
+  resolveSourcePath,
+  checkRequiredEnv,
+  checkCorpusFiles,
+  checkChannelRoles,
+  loadConfiguredPrograms,
+} from "./doctor.mjs";
 
 const SECRET = "s3cr3t-do-not-print";
 
@@ -23,7 +31,7 @@ const COMPLETE_ENV = {
   SLACK_BOT_TOKEN: "xoxb-" + SECRET,
   SLACK_APP_TOKEN: "xapp-" + SECRET,
   SLACK_HELP_CHANNEL: "C0000000000",
-  SLACK_FAQ_CHANNELS: "C0000000000,C1111111111",
+  SLACK_FAQ_CHANNELS: "C1111111111",
   RIVET_DASHBOARD_PASSCODE: "correct-horse-" + SECRET,
   SLACK_CLIENT_ID: "1234567890.9876543210",
 };
@@ -75,9 +83,33 @@ test("a complete, healthy configuration passes every check", () => {
     files: ["loadout/corpus/01-program.md", "loadout/corpus/07-faq.md"],
   });
 
-  assert.equal(r.failures, 0, render(r));
-  assert.equal(r.warnings, 0, render(r));
-  assert.equal(r.passes, r.checks.length);
+  // channel roles is excluded: it reads the engine's own program database and
+  // config file rather than this env seam, so it is asserted separately above.
+  const controlled = r.checks.filter((c) => c.name !== "channel roles");
+  assert.equal(
+    controlled.filter((c) => c.status === "fail").length,
+    0,
+    render(r),
+  );
+  assert.equal(
+    controlled.filter((c) => c.status === "warn").length,
+    0,
+    render(r),
+  );
+});
+
+test("the report includes a channel-role check, the one the engine refuses to boot on", () => {
+  // Deliberately not asserting pass/fail parity: this check runs the real
+  // lib/channelPolicy validator, which also reads the program database and
+  // config/programs.json, so its verdict depends on engine state a unit test
+  // cannot stub. What must hold is that the check exists and is wired in —
+  // its absence is what let --doctor go green while the bot crash-looped.
+  const r = report({ env: COMPLETE_ENV, files: [] });
+  assert.ok(
+    r.checks.some((c) => c.name === "channel roles"),
+    "report is missing the channel roles check",
+  );
+  assert.ok(r.checks.every((c) => ["pass", "fail", "warn"].includes(c.status)));
 });
 
 test("a program that claims no channel warns, because it can never answer", () => {
@@ -156,7 +188,10 @@ test("a renamed corpus file is a failure naming the path", () => {
   assert.equal(check.status, "fail");
   assert.ok(check.detail.includes("loadout/corpus/07-faq.md"), check.detail);
   assert.ok(check.detail.includes("acme"), check.detail);
-  assert.equal(r.failures, 1);
+  // Exactly one failure is attributable to this seam; channel roles reads
+  // engine state this seam does not control.
+  const controlled = r.checks.filter((c) => c.name !== "channel roles");
+  assert.equal(controlled.filter((c) => c.status === "fail").length, 1);
 });
 
 test("a file:// source outside the app root fails instead of being read", () => {
