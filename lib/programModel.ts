@@ -215,23 +215,38 @@ function validateChannelRoles({
   };
   if (legacyHelp) {
     const owner = roleOf(legacyHelp);
-    if (owner && owner.role !== "help") {
+    // A program claiming the help channel as "main" is not a conflict: the
+    // help role wins at resolve time (DM > help > organizer > main), and a
+    // help channel already replies to every top-level message, so declaring
+    // it main as well changes nothing. Only a competing organizer role is
+    // genuinely contradictory.
+    if (owner && owner.role !== "help" && owner.role !== "main") {
       errors.push({
         channelId: legacyHelp,
         message: `SLACK_HELP_CHANNEL ${legacyHelp} is configured as ${owner.role} of ${owner.programId}`,
       });
     }
+    // A main claim is fine only when the program has no help channel of its
+    // own. If it declares one, SLACK_HELP_CHANNEL is pointing somewhere the
+    // program did not intend, and two help channels is a real contradiction.
+    const ownerProgram = programs.find((p) => p && p.id === owner?.programId);
+    if (owner && owner.role === "main" && ownerProgram?.helpChannel && ownerProgram.helpChannel !== legacyHelp) {
+      errors.push({
+        channelId: legacyHelp,
+        message: `SLACK_HELP_CHANNEL ${legacyHelp} conflicts with helpChannel ${ownerProgram.helpChannel} of ${ownerProgram.id}`,
+      });
+    }
   }
   for (const ch of legacyMain || []) {
+    // Listing the help channel in SLACK_FAQ_CHANNELS too is redundant, not
+    // ambiguous - help already supersedes main at resolve time.
+    if (legacyHelp && ch === legacyHelp) continue;
     const owner = roleOf(ch);
     if (owner && owner.role !== "main") {
       errors.push({
         channelId: ch,
         message: `SLACK_FAQ_CHANNELS entry ${ch} is configured as ${owner.role} of ${owner.programId}`,
       });
-    }
-    if (legacyHelp && ch === legacyHelp) {
-      errors.push({ channelId: ch, message: `${ch} is in both SLACK_HELP_CHANNEL and SLACK_FAQ_CHANNELS` });
     }
   }
 

@@ -113,8 +113,29 @@ test("same channel id in different workspaces is not a conflict", () => {
   expect(r.ok).toBe(true);
 });
 
-test("a channel in both SLACK_HELP_CHANNEL and SLACK_FAQ_CHANNELS is a conflict", () => {
-  expect(model.validateChannelRoles({ programs: [], legacyHelp: "C1", legacyMain: ["C1"] }).ok).toBe(false);
+test("the help channel may also be listed in SLACK_FAQ_CHANNELS", () => {
+  // A help channel already replies to every top-level message, so naming it
+  // as a main channel too is redundant rather than contradictory. This is the
+  // single-channel deployment: one channel serving as the program's help
+  // channel and its ambient-reply channel at once.
+  expect(model.validateChannelRoles({ programs: [], legacyHelp: "C1", legacyMain: ["C1"] }).ok).toBe(true);
+});
+
+test("a program claiming the help channel as main is not a conflict", () => {
+  const r = model.validateChannelRoles({
+    programs: [{ id: "loadout", channels: ["C1"] }],
+    legacyHelp: "C1",
+    legacyMain: ["C1"],
+  });
+  expect(r.ok).toBe(true);
+});
+
+test("an organizer channel competing with the help channel is still a conflict", () => {
+  const r = model.validateChannelRoles({
+    programs: [{ id: "loadout", channels: ["C1"], organizerChannel: "C1" }],
+    legacyHelp: "C1",
+  });
+  expect(r.ok).toBe(false);
 });
 
 test("a hosted claim that disagrees with config is a conflict", () => {
