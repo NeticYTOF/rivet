@@ -21,6 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIB = path.join(ROOT, "lib");
 const WIZARD = path.join(ROOT, "rivet-wizard");
 const SCRIPTS = path.join(ROOT, "scripts");
+const NO_ENV_FILE = path.join(ROOT, ".no-such-env-file");
 // Upper bound for a single test file. Generous enough for the slowest suite
 // here, short enough that a stuck file fails the run instead of blocking it.
 const TEST_FILE_TIMEOUT_MS = 120_000;
@@ -55,6 +56,7 @@ function hermeticEnv() {
     }
   }
   env.TZ = "UTC";
+  env.RIVET_SKIP_DOTENV = "1";
   return env;
 }
 
@@ -62,7 +64,11 @@ function runOne(file, junitDir) {
   return new Promise((resolve) => {
     const rel = path.relative(ROOT, file);
     const inWizard = file.startsWith(WIZARD + path.sep);
-    const args = ["test", inWizard ? `./${path.relative(WIZARD, file)}` : file];
+    // --env-file pointing at a file that does not exist stops Bun from
+    // auto-loading the developer's real .env in the child. Without it the
+    // strip above is undone at import time by dotenv, and a developer with a
+    // configured workspace silently fails tests that assume no channels.
+    const args = ["test", `--env-file=${NO_ENV_FILE}`, inWizard ? `./${path.relative(WIZARD, file)}` : file];
     if (junitDir) {
       const out = path.join(junitDir, `${rel.replaceAll(path.sep, "__").replace(/\.test\.[jt]s$/, "")}.xml`);
       args.push("--reporter=junit", `--reporter-outfile=${out}`);

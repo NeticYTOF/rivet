@@ -42,9 +42,18 @@ interface IntentOptions {
   returnContext?: boolean;
 }
 
-const MAX_TOKENS = 20;
+// The classifier must emit a five-key JSON object (see parseContextResult),
+// which costs well over 100 tokens. A 20-token cap truncated every response
+// mid-object, so parsing always failed and every message came back null —
+// which the pipeline reads as "not a program question", i.e. a silent bot.
+// Reasoning models need far more again, since they emit reasoning first.
+const MAX_TOKENS = Math.max(20, Number(process.env.INTENT_MAX_TOKENS) || 300);
 const MIN_LENGTH = 5;
-const TIMEOUT_MS = 10000;
+// Bounded so a slow classifier can never stall a Slack reply. Overridable
+// because a self-hosted or cold provider can legitimately exceed 10s — and
+// timing out is not a soft failure here: a null intent means the bot stays
+// silent on unprompted questions, which looks exactly like "broken".
+const TIMEOUT_MS = Math.max(1000, Number(process.env.INTENT_TIMEOUT_MS) || 10000);
 const HELP_NEEDED = "HELP_NEEDED";
 const CASUAL_CHAT = "CASUAL_CHAT";
 const OFF_TOPIC = "OFF_TOPIC";

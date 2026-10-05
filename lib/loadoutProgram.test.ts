@@ -15,6 +15,7 @@ interface LoadoutProgram {
   id: string;
   scope?: string;
   channels?: string[];
+  helpChannel?: string;
   sources: LoadoutSource[];
   pinnedRules: string[];
 }
@@ -39,10 +40,21 @@ test("every LOADOUT source is a named markdown file inside the repo", () => {
   }
 });
 
-test("the LOADOUT program stays inert until channels are claimed", () => {
+test("the LOADOUT program claims explicit Slack channels", () => {
   const program = loadout();
   expect(program.scope).toBe("program");
-  expect(program.channels ?? []).toEqual([]);
+  expect(program.channels?.length ?? 0).toBeGreaterThan(0);
+  for (const channel of program.channels ?? []) expect(channel).toMatch(/^C[A-Z0-9]+$/);
+});
+
+test("the LOADOUT program never claims a channel as both help and main", () => {
+  // Rivet refuses to boot when one channel carries both roles: the help
+  // channel files tickets and escalates, the main channel replies ambiently.
+  // Overlapping them produces "channel role configuration invalid" and the bot
+  // never starts, which reads as "the bot is broken" rather than a config clash.
+  const program = loadout();
+  expect(program.helpChannel).toBeUndefined();
+  expect(program.channels ?? []).not.toContain(program.helpChannel);
 });
 
 test("LOADOUT pins the canonical economy rules that the corpus is graded on", () => {

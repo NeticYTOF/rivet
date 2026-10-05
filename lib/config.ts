@@ -7,7 +7,11 @@ interface KeyPoolState {
   now: number;
 }
 type RateLimitHandler = (key: string | undefined, ms?: number) => void;
-dotenv.config();
+// The test runner sets RIVET_SKIP_DOTENV=1. dotenv.config() would otherwise
+// re-read the developer's real .env inside every test child, undoing the
+// harness's env stripping — a configured workspace then makes tests that
+// assume no claimed channels fail, with no obvious link to the cause.
+if (process.env.RIVET_SKIP_DOTENV !== "1") dotenv.config();
 
 const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
 const DEFAULT_MODEL = "deepseek-v4-flash-free";
