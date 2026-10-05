@@ -216,10 +216,12 @@ test("main ambient: 'what is acme?' answers from Acme knowledge", async () => {
 });
 
 test("main ambient: another program's channel never reaches Acme sources", async () => {
-  const spoke = await send({ channel: "C_BETA_MAIN", text: "what is restoration energy?" });
+  await send({ channel: "C_BETA_MAIN", text: "what is restoration energy?" });
+  // The isolation property is which corpus was consulted, not whether a
+  // message appeared: an ungrounded program question now gets an honest
+  // decline rather than silence.
   expect(answerCalls[0].program).toBe("beta");
-  expect(spoke).toBe(false);
-  expect(posts).toHaveLength(0);
+  expect(answerCalls.every((c) => c.program === "beta")).toBe(true);
 });
 
 for (const chatter of ["lmao gg", "did you finish your game?"]) {
@@ -232,22 +234,21 @@ for (const chatter of ["lmao gg", "did you finish your game?"]) {
   });
 }
 
-test("main ambient: unsupported shipping question stays silent", async () => {
-  expect(await send({ channel: "C_ACME_MAIN", text: "does the hardware grant cover shipping?" })).toBe(false);
+test("main ambient: unsupported shipping question declines without inventing coverage", async () => {
+  await send({ channel: "C_ACME_MAIN", text: "does the hardware grant cover shipping?" });
   expect(answerCalls).toHaveLength(1);
-  expect(posts).toHaveLength(0);
   expect(handOffs).toHaveLength(0);
+  // It may decline out loud, but it must not claim shipping is or isn't covered.
+  expect(postedText()).not.toMatch(/\b(shipp?ing|covered|not covered)\b/i);
 });
 
-test("main ambient: exact payout is never fabricated — silence", async () => {
-  expect(await send({ channel: "C_ACME_MAIN", text: "what is my exact payout amount right now?" })).toBe(false);
-  expect(posts).toHaveLength(0);
+test("main ambient: exact payout is never fabricated", async () => {
+  await send({ channel: "C_ACME_MAIN", text: "what is my exact payout amount right now?" });
+  expect(postedText()).not.toMatch(/\d/);
 });
 
-test("main ambient: exact AI-code percentage without evidence — silence, no number", async () => {
-  expect(await send({ channel: "C_ACME_MAIN", text: "what is the exact maximum percentage of AI code allowed?" })).toBe(
-    false,
-  );
+test("main ambient: exact AI-code percentage without evidence, no number", async () => {
+  await send({ channel: "C_ACME_MAIN", text: "what is the exact maximum percentage of AI code allowed?" });
   expect(postedText()).not.toMatch(/\d+\s*%/);
 });
 

@@ -620,7 +620,8 @@ test("testQuestionExpectedAction reuses the pipeline policy", () => {
     }),
     "silence",
   );
-  assert.equal(f({ program, role: "main", settings: main, engagement: engaged, grounded: false }), "silence");
+  // An ungrounded program question in main gets an honest decline, not silence.
+  assert.equal(f({ program, role: "main", settings: main, engagement: engaged, grounded: false }), "uncertain");
   assert.equal(
     f({ program, role: "main", settings: main, addressed: true, engagement: engaged, grounded: false }),
     "uncertain",

@@ -119,6 +119,10 @@ function finalAction({
   if (talk) return s.helperEscalationEnabled ? "escalate_and_reply_chat" : "reply_chat";
   if (addressed) return s.helperEscalationEnabled ? "escalate_and_uncertain" : "uncertain";
   if (s.helperEscalationEnabled) return "escalate";
+  // A question about the program that the corpus cannot answer still gets a
+  // reply: an honest "not confirmed yet". Silence here reads as "the bot is
+  // broken" or "nobody is listening", both of which are worse than saying so.
+  if (kind === "program") return "uncertain";
   return "silence";
 }
 

@@ -127,7 +127,9 @@ test("gap recording is gated on engagement: chatter records nothing, an engaged 
       mode: respond.HELP_ONLY,
     });
 
-    assert.equal(replied, false);
+    // Engaged but ungrounded: the gap is recorded AND the bot declines out
+    // loud rather than staying silent.
+    assert.equal(replied, true);
     const after = db.handle().query("SELECT question FROM doc_gaps").all();
     assert.equal(after.length, initialGaps + 1);
     assert.ok(after.some((g: { question: string }) => g.question === "my sprite wont load at all, what should i do?"));
@@ -858,9 +860,12 @@ test("an unaddressed hand-back is deleted and not recorded as a docs gap", async
       mode: respond.HELP_ONLY,
     });
 
-    assert.equal(replied, false);
+    assert.equal(replied, true);
     assert.equal(db.topGaps(200).length, gapsBefore, "a hand-back is not a docs gap");
-    assert.deepEqual(client.calls.posts, [], "an ungrounded ambient answer is never posted");
+    // It declines out loud, but never posts a fabricated answer.
+    assert.equal(client.calls.posts.length, 1);
+    assert.ok(!client.calls.posts[0].includes(respond.MENTION_FALLBACK));
+    assert.doesNotMatch(client.calls.posts[0], /\d/);
   } finally {
     restoreAnswers();
     restoreCache();
@@ -888,8 +893,12 @@ test("an unclear verdict is silence, not the mention fallback", async () => {
       mode: respond.HELP_ONLY,
     });
 
-    assert.equal(replied, false);
-    assert.deepEqual(client.calls.posts, [], "nothing should have been posted");
+    // An unanswerable program question is declined out loud, never answered
+    // from guesswork, and never recorded as a documentation gap.
+    assert.equal(replied, true);
+    assert.equal(client.calls.posts.length, 1);
+    assert.ok(!client.calls.posts[0].includes(respond.MENTION_FALLBACK));
+    assert.doesNotMatch(client.calls.posts[0], /\d/);
     assert.equal(db.topGaps(200).length, gapsBefore, "an unanswerable message is not a docs gap");
   } finally {
     restoreAnswers();
@@ -2526,8 +2535,13 @@ test("HELP_ONLY suppresses hand-back clarification questions outside help", asyn
       question: "eh how do i do this",
       mode: respond.HELP_ONLY,
     });
-    assert.equal(handled, false, "hand-back clarification stays quiet when unaddressed");
-    assert.deepEqual(client.posts, [], "an ungrounded ambient answer is never posted");
+    assert.equal(handled, true, "an unaddressed program question is declined, not silently dropped");
+    // It may decline, but never fabricates an answer.
+    assert.ok(client.posts.length <= 1);
+    if (client.posts.length === 1) {
+      assert.doesNotMatch(String(client.posts[0].text), /\d/);
+      assert.ok(!String(client.posts[0].text).includes(respond.MENTION_FALLBACK));
+    }
   } finally {
     restoreAnswers();
     restoreCache();

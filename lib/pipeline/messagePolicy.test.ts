@@ -92,9 +92,24 @@ test("a ping still admits uncertainty when there is nothing to say, or strict gr
   );
 });
 
-test("an unaddressed message never posts an ungrounded answer", () => {
+test("an ungrounded program question is declined out loud, not silently", () => {
+  // A question about the program that the corpus cannot answer gets an honest
+  // "not confirmed yet" rather than silence, which reads as a broken bot.
   const base = { settings, addressed: false, kind: "program", grounded: false, hasAnswer: true };
-  assert.equal(finalAction({ ...base, role: "main" }), "silence");
+  assert.equal(finalAction({ ...base, role: "main" }), "uncertain");
   assert.equal(finalAction({ ...base, role: "help" }), "escalate");
+});
+
+test("ungrounded chatter is still silenced, not answered", () => {
+  // Only program questions earn the honest decline. Chat has nothing to say
+  // and should stay quiet.
+  const base = { settings, addressed: false, kind: "general", grounded: false, hasAnswer: false };
+  assert.equal(finalAction({ ...base, role: "main" }), "silence");
+});
+
+test("a grounded program question still answers", () => {
+  const base = { settings, addressed: false, kind: "program", grounded: true, hasAnswer: true };
+  assert.equal(finalAction({ ...base, role: "main" }), "reply");
+  assert.equal(finalAction({ ...base, role: "help" }), "reply");
 });
 export {};
