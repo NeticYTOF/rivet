@@ -1,0 +1,68 @@
+{
+  "id": "loadout",
+  "name": "LOADOUT",
+  "scope": "program",
+  "posture": "active",
+  "supportName": "LOADOUT",
+  "replySignature": "— rivet, LOADOUT's helper",
+  "aiAnswers": true,
+  "ticketsEnabled": true,
+  "autoEscalate": true,
+  "helperPing": true,
+  "supportActive": true,
+  "autoAssign": true,
+  "ticketVisibility": "public",
+  "learning": "active",
+  "requireGroundedAnswer": true,
+  "status": "sandbox",
+  "pinnedRules": [
+    "Cores are LOADOUT's spendable currency. Never call them Bolts, XP, or points.",
+    "There are five builder tracks: Compute, Systems, Hardware, Build, Research.",
+    "Every 3 levels in a track earns a reduction coupon for that track, capped at 25%.",
+    "Levels unlock, Cores buy.",
+    "Dates, eligibility, inventory, prices, sponsors, and participation numbers are unconfirmed. Never state them as fact.",
+    "Rivet must not answer with the superseded Bolts / four-track / Requisition model."
+  ],
+  "links": {
+    "website": "https://loadout-jerry-team1.vercel.app/",
+    "rsvp": "https://rsvp.soon.it/loadout",
+    "slack": "#loadout"
+  },
+  "sources": [
+    {
+      "name": "LOADOUT — the program",
+      "type": "markdown",
+      "url": "file://loadout/corpus/01-program.md"
+    },
+    {
+      "name": "LOADOUT — builder tracks",
+      "type": "markdown",
+      "url": "file://loadout/corpus/02-tracks.md"
+    },
+    {
+      "name": "LOADOUT — Cores and rewards",
+      "type": "markdown",
+      "url": "file://loadout/corpus/03-economy.md"
+    },
+    {
+      "name": "LOADOUT — the shop",
+      "type": "markdown",
+      "url": "file://loadout/corpus/04-shop.md"
+    },
+    {
+      "name": "LOADOUT — what counts",
+      "type": "markdown",
+      "url": "file://loadout/corpus/05-eligibility.md"
+    },
+    {
+      "name": "LOADOUT — timeline",
+      "type": "markdown",
+      "url": "file://loadout/corpus/06-timeline.md"
+    },
+    {
+      "name": "LOADOUT — FAQ",
+      "type": "markdown",
+      "url": "file://loadout/corpus/07-faq.md"
+    }
+  ]
+}
