@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+.git
+.github
+docs
+rivet-wizard
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+.env*
+.firecrawl

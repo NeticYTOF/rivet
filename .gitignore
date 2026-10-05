@@ -1,0 +1,24 @@
+node_modules/
+*.log
+.DS_Store
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# runtime state
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.firecrawl/
+
+# dashboard build output
+rivet-wizard/.next/
+rivet-wizard/out/
+rivet-wizard/*.tsbuildinfo
+rivet-wizard/.vercel

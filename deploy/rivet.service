@@ -1,0 +1,40 @@
+# systemd user unit for rivet.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/rivet.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now rivet
+#
+# Logs:   journalctl --user -u rivet -f
+# Reload: systemctl --user restart rivet
+#
+# `loginctl enable-linger $USER` makes it survive logout / start at boot.
+#
+# Set WorkingDirectory to your checkout.
+
+[Unit]
+Description=Rivet program support bot
+After=network-online.target
+Wants=network-online.target
+# A config error (missing env var) exits 1 immediately and would otherwise
+# restart every 5s forever. Giving up after 5 tries in 5 minutes surfaces it as
+# a failed unit instead of a silent loop. A crash during normal operation is
+# nowhere near this rate, so it still self-heals.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/rivet
+ExecStart=%h/.bun/bin/bun index.ts
+Restart=always
+RestartSec=5
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,808 @@
+@import "tailwindcss";
+
+/* Rivet's voice for the product is the onboarding's: a pixel display face over
+   a near-black night ground, warm cream copy, and lime as the only saturated
+   thing on screen. `public/pixelify.woff2` is the same asset the marketing
+   site and the setup wizard load, so the display type is literally one file
+   across all three surfaces. */
+@font-face {
+  font-family: "Rivet Pixel";
+  src: url("/pixelify.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* `dark:` follows Rivet's own theme attribute, never the OS preference: night
+   is the default, so `dark:` is simply "not explicitly day". */
+@custom-variant dark {
+  &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) { @slot; }
+}
+
+/* The single source of truth for colour, type and radius. Values are repeated
+   in the unlayered `:root` below (so they are emitted even when Tailwind
+   tree-shakes an unused theme key) and overridden wholesale by
+   `:root[data-theme="light"]` — which is why every page re-themes from these
+   names alone, with no per-page edits. */
+@theme {
+  --color-ink: #08110d;
+  --color-panel: #0e1210;
+  --color-panel-2: #141916;
+  --color-line: #262c28;
+  --color-line-strong: #3a3f3c;
+  --color-text: #ecebe4;
+  --color-text-muted: #a9ada8;
+  --color-brand: #a1f75e;
+  --color-brand-dim: #6da644;
+  --color-on-brand: #0d1a07;
+  --color-mint: #7fd6a0;
+  --color-tang: #e0a95c;
+  --color-danger: #e5705c;
+  /* Button lime is its own token, not `brand`: it stays identical in both
+     themes, so a primary action never drifts toward the day palette's green. */
+  --color-lime: #a1f75e;
+  --color-lime-deep: #6da644;
+  --color-lime-ink: #0d1a07;
+  /* The accent for a *small mark* on the page ground: eyebrow square,
+     active-nav bar, logo dot, initials in a lime wash. Night is the button
+     lime; day is the brand green, because lime on cream is 1.2:1 — a smudge,
+     not a mark. One token, so a mark can't be lime here and green there. */
+  --color-mark: var(--color-lime);
+
+  /* Rivet's radii are near-square. `rounded-full` survives only for tiny
+     status dots and avatars. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 5px;
+  --radius-2xl: 6px;
+  --radius: 4px;
+
+  /* Three voices. Display (Rivet Pixel) is reserved for the logo, page titles
+     and the occasional panel title. Sans (Inter) carries body and UI copy. Mono
+     (JetBrains Mono) is operational text only: ids, timestamps, states, source
+     keys, figures. `font-heading` is an alias of the display face so a heading
+     can never quietly fall back to a humanist sans. */
+  --font-display: "Rivet Pixel", "Courier New", monospace;
+  --font-heading: "Rivet Pixel", "Courier New", monospace;
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono-heading:
+    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas,
+    monospace;
+  --font-mono: var(--font-mono-heading);
+}
+
+/* Night — the default. `:root` carries the full palette (not just the keys
+   Tailwind happens to reference) so a runtime override is always a complete
+   set, and so `--font-display` / `--font-heading` exist even when no utility
+   pulls them into the output. */
+:root {
+  color-scheme: dark;
+  --color-ink: #08110d;
+  --color-panel: #0e1210;
+  --color-panel-2: #141916;
+  --color-line: #262c28;
+  --color-line-strong: #3a3f3c;
+  --color-text: #ecebe4;
+  --color-text-muted: #a9ada8;
+  --color-brand: #a1f75e;
+  --color-brand-dim: #6da644;
+  --color-on-brand: #0d1a07;
+  --color-mint: #7fd6a0;
+  --color-tang: #e0a95c;
+  --color-danger: #e5705c;
+  --color-lime: #a1f75e;
+  --color-lime-deep: #6da644;
+  --color-lime-ink: #0d1a07;
+  --color-mark: var(--color-lime);
+  /* How far a tone colour carries into a border or a chip fill. */
+  --tone-mix: 35%;
+  /* One step below `text-muted`, for the sidebar's second nav group: a real
+     step at night (6.1:1 on ink), plain muted in day, where another 20% off an
+     already mid-tone cream grey lands at 3.4:1 and reads as disabled. */
+  --text-dim: #8f938e;
+  --font-display: "Rivet Pixel", "Courier New", monospace;
+  --font-heading: "Rivet Pixel", "Courier New", monospace;
+}
+
+/* Day — paper, not white. Explicit opt-in only; the same keys, the same
+   relationships, so nothing has to know which palette is live.
+
+   Tuned against the night palette, not derived from it — every value measured
+   on the two day grounds text sits on (ink, panel) and on panel-2, the darkest
+   day surface a status label lands on:
+     text 13.9 · muted 5.4 · brand 4.9 · mint 5.2 · tang 5.4 · danger 5.6
+   Both line steps are dark enough (1.4:1 / 1.9:1) that a 1px border still reads
+   as an edge, which is the whole job a border has in a theme whose surfaces
+   have no luminance gap. `lime*` is untouched: the button is the same lime by
+   daylight, and `--color-mark` carries the accent onto paper. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-ink: #f3eee1;
+  --color-panel: #fbf8ef;
+  --color-panel-2: #efe9da;
+  --color-line: #d3c9b1;
+  --color-line-strong: #bcb094;
+  --color-text: #16241a;
+  --color-text-muted: #5c625b;
+  --color-brand: #3c7415;
+  --color-brand-dim: #336313;
+  --color-on-brand: #0d1a07;
+  --color-mint: #27764f;
+  --color-tang: #8f5a17;
+  --color-danger: #ab4034;
+  --color-mark: var(--color-brand);
+  --text-dim: var(--color-text-muted);
+  /* How far a tone colour carries into a border or a chip fill. */
+  --tone-mix: 60%;
+  --chart-ramp-floor: var(--color-line-strong);
+}
+
+/* In the base layer, not unlayered: an unlayered `*` rule outranks every
+   utility regardless of specificity, which would quietly repaint
+   `border-brand/60` and friends with the neutral line colour. */
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html,
+  body {
+    background: var(--color-ink);
+    color: var(--color-text);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  ::selection {
+    background: var(--color-lime);
+    color: var(--color-lime-ink);
+  }
+}
+
+/* Display type, unlayered so it beats a `font-sans` utility sitting on the
+   same element. Weight 400 and zero tracking: the pixel face's own grid is
+   the spacing, and a heavier cut turns headings muddy at 34px. */
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.font-heading {
+  font-family: var(--font-heading);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Day has no dark surface — ink, panel and panel-2 are all paper — so every
+   `text-lime` in the product is lime on cream there: 1.2:1, a smudge. Remap the
+   day ground's lime *text* to `--color-mark` in one place, so the initial tiles,
+   the copilot badge and the public profile mark stop washing out without each
+   page owning a theme check. Unlayered on purpose: a components-layer rule
+   would lose to the utility it corrects. `bg-lime` is untouched — button fill. */
+:root[data-theme="light"] .text-lime {
+  color: var(--color-mark);
+}
+
+/* Rivet's dot texture. Opt-in per surface via this class — it marks a
+   "support-signal zone" (the hero, a product-story panel), never a default
+   page background. Put it on a decorative layer behind content, not on the
+   content's own element, so `dot-grid-fade` fades only the texture. */
+.dot-grid {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, var(--color-text) 12%, transparent) 1px,
+    transparent 0
+  );
+  background-size: 20px 20px;
+}
+.dot-grid-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 92%);
+  mask-image: linear-gradient(to bottom, #000 45%, transparent 92%);
+}
+
+/* The loading skeleton. Unlayered because `@keyframes` is not something the
+   cascade needs to arbitrate and keeping it beside the rule that uses it is what
+   makes the pair readable. A two-step opacity fade on the same `steps(2)` clock
+   as every other transition — no shimmer sweep, because a travelling highlight
+   is the one loading idiom the night world doesn't have. */
+@keyframes rivet-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* @layer components so a utility class on the same element (e.g. `pl-8` to
+   make room for a leading icon) always wins over these defaults — plain,
+   unlayered rules would otherwise beat Tailwind's utility layer regardless
+   of class order, silently ignoring any override placed alongside them. */
+@layer components {
+  /* ------------------------------------------------------------- surfaces -- */
+
+  .rivet-panel {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-panel);
+  }
+  .rivet-panel-raised {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-panel-2);
+  }
+
+  /* --------------------------------------------------------------- inputs -- */
+
+  .rivet-input {
+    width: 100%;
+    padding: 8px 11px;
+    border: 1px solid var(--color-line);
+    border-radius: 3px;
+    background: #0b100e;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    transition: background-color 90ms steps(2, end), border-color 90ms steps(2, end);
+  }
+  /* The night input ground is darker than any panel; on paper that reads as a
+     hole punched in the page, so day uses the panel colour — and then has no
+     luminance gap to fall back on, so its border takes the `line-strong` step a
+     quiet button and a table head use. */
+  :root[data-theme="light"] .rivet-input {
+    background: var(--color-panel);
+    border-color: var(--color-line-strong);
+  }
+  :root[data-theme="light"] .rivet-input:focus {
+    border-color: var(--color-brand);
+  }
+  .rivet-input::placeholder {
+    color: var(--color-text-muted);
+  }
+  .rivet-input:focus {
+    border-color: var(--color-brand);
+    background: var(--color-panel-2);
+  }
+  .rivet-input:disabled {
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  /* -------------------------------------------------------------- buttons -- */
+
+  .rivet-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    /* Notched corners instead of a border radius — the one silhouette the
+       whole product shares, from the onboarding Continue button down to a
+       28px quiet button. */
+    clip-path: polygon(3px 0, calc(100% - 3px) 0, 100% 3px, 100% calc(100% - 3px), calc(100% - 3px) 100%, 3px 100%, 0 calc(100% - 3px), 0 3px);
+    transition: background-color 90ms steps(2, end), color 90ms steps(2, end), box-shadow 90ms steps(2, end), transform 90ms steps(2, end);
+  }
+  .rivet-button:active {
+    transform: translateY(1px);
+  }
+  .rivet-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  /* clip-path eats outlines, so focus is an inset ring like the wizard's. */
+  .rivet-button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--color-brand);
+  }
+
+  .rivet-button-primary {
+    background: var(--color-lime);
+    color: var(--color-lime-ink);
+    box-shadow: inset 0 -2px 0 var(--color-lime-deep);
+  }
+  .rivet-button-primary:hover {
+    background: color-mix(in srgb, var(--color-lime) 86%, #ffffff);
+  }
+  .rivet-button-primary:active {
+    box-shadow: inset 0 -1px 0 var(--color-lime-deep);
+  }
+  /* The focus ring composites with the hard bottom edge rather than replacing
+     it, so a focused primary button still reads as a primary button. */
+  .rivet-button-primary:focus-visible {
+    box-shadow: inset 0 -2px 0 var(--color-lime-deep), inset 0 0 0 2px var(--color-lime-ink);
+  }
+
+  .rivet-button-quiet {
+    background: var(--color-panel);
+    color: var(--color-text);
+    box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  }
+  .rivet-button-quiet:hover {
+    box-shadow: inset 0 0 0 1px var(--color-text-muted);
+  }
+
+  .rivet-button-ghost {
+    background: transparent;
+    color: var(--color-text-muted);
+  }
+  .rivet-button-ghost:hover {
+    color: var(--color-text);
+  }
+
+  .rivet-button-danger {
+    background: var(--color-panel);
+    color: var(--color-danger);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 50%, transparent);
+  }
+  .rivet-button-danger:hover {
+    box-shadow: inset 0 0 0 1px var(--color-danger);
+  }
+
+  .rivet-button-sm {
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  /* The top bar's square icon button: theme toggle, incidents bell. One class
+     for both, so the two neighbours are the same 30px tile with the same 1px
+     outline — and day has one place to tune it. No clip-path here, so the
+     outline is a real box-shadow ring and focus is a brighter one. */
+  .rivet-icon-button {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    place-items: center;
+    border-radius: 3px;
+    color: var(--color-text-muted);
+    box-shadow: inset 0 0 0 1px var(--color-line-strong);
+    transition: color 90ms steps(2, end), box-shadow 90ms steps(2, end);
+  }
+  .rivet-icon-button:hover {
+    color: var(--color-text);
+  }
+  .rivet-icon-button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--color-brand);
+  }
+
+  /* -------------------------------------------------------------- notices -- */
+
+  /* A tone at `--tone-mix` over near-black still reads as an edge; at the same
+     35% over cream it is a 1.2:1 wash, which is why day raises the mix to 60%
+     (≈2.3:1). The icon and the copy say the tone twice already — the border
+     only has to make the box. */
+  .rivet-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-line);
+    border-radius: 3px;
+    background: var(--color-panel);
+    color: var(--color-text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .rivet-notice-warn {
+    border-color: color-mix(in srgb, var(--color-tang) var(--tone-mix), transparent);
+  }
+  .rivet-notice-error {
+    border-color: color-mix(in srgb, var(--color-danger) var(--tone-mix), transparent);
+  }
+  .rivet-notice-success {
+    border-color: color-mix(in srgb, var(--color-mint) var(--tone-mix), transparent);
+  }
+  .rivet-notice-icon {
+    display: block;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    margin-top: 1px;
+    color: var(--color-text-muted);
+  }
+  .rivet-notice-warn .rivet-notice-icon {
+    color: var(--color-tang);
+  }
+  .rivet-notice-error .rivet-notice-icon {
+    color: var(--color-danger);
+  }
+  .rivet-notice-success .rivet-notice-icon {
+    color: var(--color-mint);
+  }
+  .rivet-notice-body {
+    min-width: 0;
+    flex: 1;
+  }
+  .rivet-notice-title {
+    color: var(--color-text);
+    font-weight: 600;
+  }
+
+  /* --------------------------------------------------------- empty states -- */
+
+  .rivet-empty {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    border: 1px dashed var(--color-line);
+    border-radius: 3px;
+    background: var(--color-panel);
+  }
+  .rivet-empty-art {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    image-rendering: pixelated;
+    opacity: 0.85;
+  }
+  .rivet-empty-title {
+    color: var(--color-text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .rivet-empty-hint {
+    margin-top: 4px;
+    color: var(--color-text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* ------------------------------------------------------------- skeletons -- */
+
+  /* The loading placeholder block: square-cornered, one step above the panel
+     it stands in for, and silent about how long it will be there. Lives here,
+     not in a route file, so every skeleton in the product is the same block
+     with the same clock and a page can never re-declare it. */
+  .rivet-skeleton {
+    border-radius: 0;
+    background: var(--color-panel-2);
+    animation: rivet-skeleton-pulse 1.6s steps(2, end) infinite;
+  }
+  /* Reduced motion drops the pulse outright rather than zeroing its duration,
+     so the block holds at full opacity and never reads as mid-fade. */
+  @media (prefers-reduced-motion: reduce) {
+    .rivet-skeleton {
+      animation: none;
+    }
+  }
+
+  /* ---------------------------------------------------------------- chips -- */
+
+  .rivet-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 7px;
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+    background: var(--color-panel);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .rivet-chip-lime {
+    border-color: color-mix(in srgb, var(--color-brand) var(--tone-mix), transparent);
+    background: color-mix(in srgb, var(--color-brand) 8%, transparent);
+    color: var(--color-brand);
+  }
+  /* A chip on paper is panel-on-panel, so its border is all that draws it, and
+     8% of a green over cream is nothing. Day gives the lime chip the tone mix
+     and a 12% fill, and every chip the `line-strong` edge an input uses. */
+  :root[data-theme="light"] .rivet-chip-lime {
+    background: color-mix(in srgb, var(--color-mark) 12%, transparent);
+    color: var(--color-mark);
+  }
+  :root[data-theme="light"] .rivet-chip {
+    border-color: var(--color-line-strong);
+  }
+
+  /* --------------------------------------------------------------- tables -- */
+
+  .rivet-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+  .rivet-table th {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-line-strong);
+    color: var(--color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .rivet-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-line);
+    color: var(--color-text);
+    vertical-align: top;
+  }
+  .rivet-table tbody tr:hover td {
+    background: var(--color-panel-2);
+  }
+  .rivet-table caption {
+    padding: 0 12px 8px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    text-align: left;
+  }
+
+  /* ------------------------------------------------------------- eyebrows -- */
+
+  /* Section label. Always preceded by `.rivet-mark` — a lime square, never a
+     round dot. */
+  .rivet-eyebrow {
+    display: inline-block;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .rivet-mark {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    flex: 0 0 6px;
+    border-radius: 0;
+    background: var(--color-mark);
+  }
+
+  /* The same accent for a mark whose size comes from utilities — the active-nav
+     bar, the logo dot. Split out so the 6px square stays the one fixed mark. */
+  .rivet-mark-bg {
+    background-color: var(--color-mark);
+  }
+
+  /* The phone program nav: thirteen items, three ever on screen. The right edge
+     fades over the last 28px so the cut item reads as "more this way". */
+  .rivet-mobile-nav {
+    -webkit-mask-image: linear-gradient(to right, #000 0 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0 calc(100% - 28px), transparent 100%);
+  }
+
+  /* The sidebar's scroll region. All seventeen items fit a 1086px window; on a
+     900px one the second group is cut mid-item, and a cut nav item is the same
+     problem as a cut word. When the nav does fit, this box's bottom 24px is
+     empty, so the fade has nothing to fade. */
+  .rivet-nav-scroll {
+    -webkit-mask-image: linear-gradient(to bottom, #000 0 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0 calc(100% - 24px), transparent 100%);
+  }
+
+  /* ----------------------------------------------------------- atmosphere -- */
+
+  /* The shell root. Paints the night ground and a sparse star field of 2px
+     lime/cream squares — dim enough to read as depth, never as decoration.
+     The field is this element's own background, the first layer of its own
+     stacking context, so every panel, row and glyph in the ledger paints over
+     it by construction: no star can land on top of content and no z-index has
+     to hold that promise. Fixed, so the field does not swim while the ledger
+     scrolls.
+     `--rivet-art-band` is the single number both the night art band and the
+     main column's bottom reserve read, so the band can never grow into the
+     content. Day and sub-1024px drop the art, so the band is 0 there and the
+     column keeps only `main`'s own padding. */
+  .rivet-night {
+    --rivet-art-band: 320px;
+    position: relative;
+    isolation: isolate;
+    background-color: var(--color-ink);
+background-image:
+      radial-gradient(circle 1px at 118px 96px, rgba(161, 247, 94, 0.22) 99%, transparent 100%), radial-gradient(circle 1px at 402px 208px, rgba(161, 247, 94, 0.18) 99%, transparent 100%),
+      radial-gradient(circle 1px at 742px 128px, rgba(161, 247, 94, 0.2) 99%, transparent 100%), radial-gradient(circle 1px at 1136px 188px, rgba(161, 247, 94, 0.16) 99%, transparent 100%),
+      radial-gradient(circle 1px at 86px 402px, rgba(161, 247, 94, 0.2) 99%, transparent 100%), radial-gradient(circle 1px at 598px 356px, rgba(161, 247, 94, 0.14) 99%, transparent 100%),
+      radial-gradient(circle 1px at 972px 470px, rgba(161, 247, 94, 0.18) 99%, transparent 100%), radial-gradient(circle 1px at 1394px 372px, rgba(161, 247, 94, 0.16) 99%, transparent 100%),
+      radial-gradient(circle 1px at 268px 662px, rgba(161, 247, 94, 0.2) 99%, transparent 100%), radial-gradient(circle 1px at 702px 748px, rgba(161, 247, 94, 0.14) 99%, transparent 100%),
+      radial-gradient(circle 1px at 1188px 690px, rgba(161, 247, 94, 0.18) 99%, transparent 100%), radial-gradient(circle 1px at 438px 918px, rgba(161, 247, 94, 0.16) 99%, transparent 100%),
+      radial-gradient(circle 1px at 1320px 902px, rgba(161, 247, 94, 0.14) 99%, transparent 100%), radial-gradient(circle 1px at 556px 84px, rgba(236, 235, 228, 0.12) 99%, transparent 100%),
+      radial-gradient(circle 1px at 1310px 306px, rgba(236, 235, 228, 0.1) 99%, transparent 100%), radial-gradient(circle 1px at 180px 848px, rgba(236, 235, 228, 0.12) 99%, transparent 100%),
+      radial-gradient(circle 1px at 1052px 852px, rgba(236, 235, 228, 0.1) 99%, transparent 100%), radial-gradient(circle 1px at 624px 540px, rgba(236, 235, 228, 0.1) 99%, transparent 100%);
+    background-size: 1600px 1000px;
+    background-repeat: repeat;
+    background-attachment: fixed;
+  }
+  /* Lime on cream is a smudge, not a star: day keeps the paper ground plain,
+     exactly as it drops the night art below. */
+  :root[data-theme="light"] .rivet-night {
+    --rivet-art-band: 0px;
+    background-image: none;
+  }
+
+  /* The night art layer: `public/rivet-night-background.png` shown unedited —
+     no filter, no recolour, no blur — in a reserved band at the very END of the
+     main column, so the horizon and Rivet read under the last panel and can
+     never show through the gap between two of them.
+
+      Art geometry (measured off the 1672x940 asset, 1:1, as in the onboarding's
+      app/wizard/_components/art.css):
+        horizon ..................... y 773.5
+        skyline mass top ............ y 600 far left, y 772 in the centre valley
+        Rivet's hair ................. y 624..800, x 1312..1535
+        her rock's crest ............. y 804
+        every sky sparkle + moon ..... above y 572
+      `overflow: hidden` cuts the box to the band, so the moon and the high sky
+      are removed structurally instead of by mask tuning, and the mask only has
+      to dissolve the skyline's top edge.
+
+      The band is 320px and the image is pushed 3.35% (56px at 1672) below the
+      band floor — percentage margins resolve against the containing block's
+      WIDTH, so the push scales with the art — which puts her hair 60px below
+      the band top and her chin 236px below it, leaving the bottom 84px for the
+      rock she sits on and the grass around it. At 240px the band stopped at her
+      jaw: the head read, the body did not, and she looked pasted onto the foot
+      of the page instead of perched on something. The mask fades a fixed 44px
+      off the top rather than a fixed fifth of the band — the fade dissolves the
+      skyline's edge, a property of the image, and a percentage fade over a
+      taller band would have eaten the 60px of sky her crown needs. */
+  .rivet-night-art {
+    position: absolute;
+    /* -1 inside the shell column's stacking context: above the night ground and
+       the star field, below every panel, row and glyph. */
+    z-index: -1;
+    right: 0;
+    bottom: 0;
+    width: max(1672px, 100%);
+    /* Past ~1.02x her crown would climb out of the band's opaque part, so the
+       art stops growing instead of losing her on a very wide screen. */
+    max-width: 1700px;
+    height: var(--rivet-art-band);
+    overflow: hidden;
+    opacity: 0.55;
+    pointer-events: none;
+    user-select: none;
+    -webkit-mask-image: linear-gradient(to top, #000 0 calc(100% - 44px), transparent 100%);
+    mask-image: linear-gradient(to top, #000 0 calc(100% - 44px), transparent 100%);
+  }
+  .rivet-night-art img {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: auto;
+    /* Beats the Tailwind preflight `img { max-width: 100% }`, which would pin
+       the art to the band width. */
+    max-width: none;
+    margin-bottom: -3.35%;
+    image-rendering: pixelated;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  /* Day is a paper theme: no night sky behind it. Below 1024px the sidebar
+     collapses and the main column is too narrow for the art to read as
+     anything but noise behind the ledger. */
+  :root[data-theme="light"] .rivet-night-art {
+    display: none;
+  }
+  @media (max-width: 1023.98px) {
+    .rivet-night-art {
+      display: none;
+    }
+    .rivet-night {
+      --rivet-art-band: 0px;
+    }
+  }
+}
+
+/* The pixel-art Rivet mark — keep the pixels crisp at every size, never
+   let the browser smooth it into mush. */
+.pixel-art { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; } }
+
+/* Chart tokens, all resolving to Rivet tokens. Series order is fixed.
+   CVD-checked: worst pair dE 10. Mint is excluded, too close to brand. */
+:root {
+  --chart-1: var(--color-brand);
+  --chart-2: var(--color-tang);
+  --chart-3: var(--color-text-muted);
+  /* Where the low steps of the categorical ramp fade toward: toward the panel
+     walks the greys DOWN on near-black and UP on paper, where the last step
+     landed at 1.7:1 and its legend swatch disappeared — so day anchors the mix
+     to `line-strong`, for the same two steps night has. */
+  --chart-ramp-floor: var(--color-panel);
+  --chart-4: color-mix(in srgb, var(--color-text-muted) 55%, var(--chart-ramp-floor));
+  --chart-5: color-mix(in srgb, var(--color-text-muted) 28%, var(--chart-ramp-floor));
+  /* A sixth slot for "this series failed" — never the lime of series 1. */
+  --chart-danger: var(--color-danger);
+  --chart-background: var(--color-panel);
+  --chart-foreground: var(--color-text);
+  --chart-foreground-muted: var(--color-text-muted);
+  --chart-line-primary: var(--chart-1);
+  --chart-line-secondary: var(--chart-2);
+  --chart-crosshair: var(--color-text-muted);
+  --chart-grid: var(--color-line);
+  --chart-brush-border: var(--color-line);
+  /* Inverted chip. */
+  --chart-tooltip-background: var(--color-text);
+  --chart-tooltip-foreground: var(--color-ink);
+  --chart-tooltip-muted: color-mix(in srgb, var(--color-ink) 60%, var(--color-text));
+  --chart-marker-background: var(--color-panel-2);
+  --chart-marker-border: var(--color-line);
+  --chart-marker-foreground: var(--color-text);
+  --chart-marker-badge-background: var(--color-text);
+  --chart-marker-badge-foreground: var(--color-ink);
+  --chart-indicator-color: var(--chart-1);
+  --chart-indicator-secondary-color: var(--chart-2);
+  --chart-segment-background: var(--color-panel-2);
+  --chart-segment-line: var(--color-line);
+  --chart-label: var(--color-text-muted);
+  /* Sequential ramp. */
+  --chart-scale-01: color-mix(in srgb, var(--color-brand) 12%, var(--color-panel));
+  --chart-scale-02: color-mix(in srgb, var(--color-brand) 30%, var(--color-panel));
+  --chart-scale-03: color-mix(in srgb, var(--color-brand) 52%, var(--color-panel));
+  --chart-scale-04: color-mix(in srgb, var(--color-brand) 74%, var(--color-panel));
+  --chart-scale-05: var(--color-brand);
+  --chart-scale-pattern-color: var(--color-panel-2);
+  /* shadcn names some internals still reach for. */
+  --border: var(--color-line);
+  --foreground: var(--color-text);
+  --muted-foreground: var(--color-text-muted);
+  --muted: var(--color-panel-2);
+}
+
+@theme inline {
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-text-dim: var(--text-dim);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-danger: var(--chart-danger);
+  --color-chart-background: var(--chart-background);
+  --color-chart-foreground: var(--chart-foreground);
+  --color-chart-foreground-muted: var(--chart-foreground-muted);
+  --chart-line-primary: var(--chart-line-primary);
+  --chart-line-secondary: var(--chart-line-secondary);
+  --color-chart-crosshair: var(--chart-crosshair);
+  --color-chart-grid: var(--chart-grid);
+  --chart-brush-border: var(--chart-brush-border);
+  --color-chart-tooltip-background: var(--chart-tooltip-background);
+  --color-chart-tooltip-foreground: var(--chart-tooltip-foreground);
+  --color-chart-tooltip-muted: var(--chart-tooltip-muted);
+  --color-chart-marker-background: var(--chart-marker-background);
+  --color-chart-marker-border: var(--chart-marker-border);
+  --color-chart-marker-foreground: var(--chart-marker-foreground);
+  --color-chart-label: var(--chart-label);
+  --color-chart-scale-01: var(--chart-scale-01);
+  --color-chart-scale-02: var(--chart-scale-02);
+  --color-chart-scale-03: var(--chart-scale-03);
+  --color-chart-scale-04: var(--chart-scale-04);
+  --color-chart-scale-05: var(--chart-scale-05);
+  --color-chart-scale-pattern-color: var(--chart-scale-pattern-color);
+}
