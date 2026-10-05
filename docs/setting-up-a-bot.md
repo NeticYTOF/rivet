@@ -4,6 +4,13 @@ Rivet is a program-agnostic engine. The public repository contains no program
 identity or documentation. Add a program through the dashboard, or supply the
 same configuration privately when self-hosting.
 
+## Slack onboarding
+
+To go from a fresh clone to a bot answering in Slack, follow
+[slack-setup.md](slack-setup.md). `bun scripts/slack-bootstrap.mjs` writes a
+`.env` skeleton, prints the Slack app manifest, and lists the remaining manual
+steps.
+
 ## Dashboard onboarding
 
 Use the dashboard onboarding flow to create a program and connect it to Rivet.

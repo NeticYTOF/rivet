@@ -1,4 +1,5 @@
 const jevDecision = require("../jevDecision");
+const veyDecision = require("../veyDecision");
 const intent = require("../intent");
 const log = require("../log");
 import type { ChannelRole } from "../types";
@@ -47,13 +48,17 @@ function postureFor(role: ChannelRole) {
   return "main";
 }
 
-function fromJev(res: JEVResult | null) {
-  if (!res) return { engage: false, intent: null, error: "unknown", source: "jev" };
+function fromDecision(res: JEVResult | null, source: "jev" | "vey") {
+  if (!res) return { engage: false, intent: null, error: "unknown", source };
   if (res.action === "error" || res.errorKind) {
-    return { engage: false, intent: null, error: res.errorKind || "unknown", source: "jev" };
+    return { engage: false, intent: null, error: res.errorKind || "unknown", source };
   }
   const intentName = res.intent || res.decision?.intent || null;
-  return { engage: res.action === "engage", intent: intentName, error: null, source: "jev" };
+  return { engage: res.action === "engage", intent: intentName, error: null, source };
+}
+
+function fromJev(res: JEVResult | null) {
+  return fromDecision(res, "jev");
 }
 
 async function fromLegacyIntent({
@@ -127,6 +132,21 @@ async function classify({
 }: ClassifyOptions) {
   if (addressed && isIdentityOrSmalltalk(message)) {
     return { engage: true, intent: "addressed_smalltalk", error: null, source: "heuristic" };
+  }
+  if (veyDecision.isEnabled()) {
+    try {
+      const res = await veyDecision.evaluateSupportDecision({
+        message,
+        conversationContext: conversationContextFor({ threadContext, recentMessages, userId }),
+        program,
+        channelPosture: postureFor(role),
+        addressed,
+      });
+      if (res && res.action !== "existing") return fromDecision(res, "vey");
+    } catch (error: unknown) {
+      log.debug("engagement", `vey threw: ${error instanceof Error ? error.name : "Error"}`);
+      return { engage: false, intent: null, error: "unknown", source: "vey" };
+    }
   }
   if (jevDecision.isEnabled()) {
     try {

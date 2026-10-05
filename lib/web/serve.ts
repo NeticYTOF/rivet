@@ -45,8 +45,9 @@ function redirect(location: string, status = 302): Response {
   return new Response(null, { status, headers: { Location: location } });
 }
 
-function htmlResponse(html: string, extraHeaders: Record<string, string> = {}): Response {
+function htmlResponse(html: string, extraHeaders: Record<string, string> = {}, status = 200): Response {
   return new Response(html, {
+    status,
     headers: { "Content-Type": "text/html; charset=utf-8", ...extraHeaders },
   });
 }
@@ -360,24 +361,37 @@ function renderLoginPage({ error, slackUrl }: { error?: string; slackUrl?: strin
 </html>`;
 }
 
+const PASSCODE_UNCONFIGURED =
+  "Passcode login is disabled: this server has no RIVET_DASHBOARD_PASSCODE set. Set it in the environment and restart Rivet.";
+
+// Null (never a guessable default) when the operator has not chosen a passcode.
+function dashboardPasscode(): string | null {
+  const configured = (process.env.RIVET_DASHBOARD_PASSCODE || "").trim();
+  return configured ? configured : null;
+}
+
 async function handleAuth(req: Request): Promise<Response | null> {
   const url = new URL(req.url);
 
   if (url.pathname === "/login") {
-    if (process.env.SLACK_CLIENT_ID === "dev-testing") {
+    if (auth.devAuthEnabled()) {
       const cookieValue = auth.signSession("dev-user", "Developer", "admin");
-      const setCookie = `${auth.COOKIE_NAME}=${cookieValue}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`;
+      const setCookie = auth.sessionCookie(cookieValue, 604800, req);
       return new Response(null, { status: 302, headers: { "Set-Cookie": setCookie, Location: "/" } });
     }
 
     if (req.method === "POST") {
+      const expected = dashboardPasscode();
+      if (!expected) {
+        log.error("web", "RIVET_DASHBOARD_PASSCODE is not set — refusing passcode login");
+        return htmlResponse(renderLoginPage({ error: PASSCODE_UNCONFIGURED, slackUrl: auth.loginUrl("/") }), {}, 503);
+      }
       try {
         const formData = await req.formData();
         const passcode = formData.get("passcode") as string | null;
-        const expected = process.env.RIVET_DASHBOARD_PASSCODE || "rivet";
-        if (passcode && passcode.trim() === expected.trim()) {
+        if (passcode && passcode.trim() === expected) {
           const cookieValue = auth.signSession("admin", "Admin", "admin");
-          const setCookie = `${auth.COOKIE_NAME}=${cookieValue}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`;
+          const setCookie = auth.sessionCookie(cookieValue, 604800, req);
           return new Response(null, { status: 302, headers: { "Set-Cookie": setCookie, Location: "/" } });
         }
         const slackUrl = auth.loginUrl("/");
@@ -388,7 +402,7 @@ async function handleAuth(req: Request): Promise<Response | null> {
     }
 
     const slackUrl = auth.loginUrl("/");
-    return htmlResponse(renderLoginPage({ slackUrl }));
+    return htmlResponse(renderLoginPage({ slackUrl, error: dashboardPasscode() ? undefined : PASSCODE_UNCONFIGURED }));
   }
 
   if (url.pathname === "/auth/callback") {
@@ -400,7 +414,7 @@ async function handleAuth(req: Request): Promise<Response | null> {
   }
 
   if (url.pathname === "/auth/logout") {
-    const result = auth.handleLogout();
+    const result = auth.handleLogout(req);
     return new Response(null, { status: result.status, headers: result.headers });
   }
 

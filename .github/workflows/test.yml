@@ -23,3 +23,28 @@ jobs:
       - run: bun run typecheck
       - run: bun run format:check
       - run: bun run test
+
+  # rivet-wizard/ is a separate npm package (its own package-lock.json), so the
+  # Core job's `bun install` covers neither its typecheck nor its tests.
+  test-wizard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      # `npm ci` installs strictly from rivet-wizard/package-lock.json and fails
+      # if it drifts from package.json, so the job can never pass by installing
+      # nothing. A bare `bun install` here would read bun.lock instead.
+      - run: npm ci
+        working-directory: rivet-wizard
+      - run: bun run typecheck
+        working-directory: rivet-wizard
+      # NOT `bun test`: `mock.module("@/lib/rivetCore", ...)` is process-wide, so
+      # a single-process run fails rivetCoreUsage/Dashboard/Errors with
+      # "Export named 'coreUsage' not found". `bun run test:wizard` is
+      # `bun scripts/run-tests.mjs --wizard` from the repo root, which spawns one
+      # `bun test <file>` process per dashboard test file.
+      - run: bun run test:wizard
+        working-directory: .

@@ -148,6 +148,18 @@ function jevConfig() {
   };
 }
 
+const VEY_BASE_URL = "http://127.0.0.1:8787";
+
+function veyConfig() {
+  return {
+    enabled: envFlag(process.env.VEY_ENABLED, false),
+    provider: "vey",
+    baseUrl: ((process.env.VEY_BASE_URL || "").trim() || VEY_BASE_URL).replace(/\/+$/, ""),
+    timeoutMs: positiveNumber(process.env.VEY_TIMEOUT_MS, 3000),
+    engageThreshold: probability(process.env.VEY_ENGAGE_THRESHOLD, 0.7),
+  };
+}
+
 const faqChannels = parseChannels(process.env.SLACK_FAQ_CHANNELS);
 
 const stagingOnlyChannels = parseChannels(process.env.RIVET_STAGING_ONLY_CHANNELS);
@@ -369,6 +381,7 @@ const config = {
     .filter(Boolean),
 
   jev: jevConfig(),
+  vey: veyConfig(),
 };
 
 function missingVars({ needsSlack }: { needsSlack: boolean }) {
@@ -401,6 +414,7 @@ function isAdmin(userId: string | null | undefined) {
 export = {
   config,
   jevConfig,
+  veyConfig,
   validate,
   missingVars,
   isAdmin,

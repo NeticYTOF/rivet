@@ -19,7 +19,7 @@ RSVP registers interest. It does not enroll you or accept you into the program.
 
 - Are the tracks good?
 - Would you actually care about levelling your Builder Profile?
-- What would you really save Cores for?
+- What would you really save Bolts for?
 - Should levels unlock different rewards?
 - What feels too similar to another YSWS?
 

@@ -20,6 +20,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIB = path.join(ROOT, "lib");
 const WIZARD = path.join(ROOT, "rivet-wizard");
+const SCRIPTS = path.join(ROOT, "scripts");
+// Upper bound for a single test file. Generous enough for the slowest suite
+// here, short enough that a stuck file fails the run instead of blocking it.
+const TEST_FILE_TIMEOUT_MS = 120_000;
 
 function collectTests(dir, suffixes = [".test.js", ".test.ts"]) {
   const out = [];
@@ -66,13 +70,37 @@ function runOne(file, junitDir) {
     const start = Date.now();
     const child = spawn("bun", args, { cwd: inWizard ? WIZARD : ROOT, env: hermeticEnv(), stdio: "pipe" });
     let output = "";
+    let settled = false;
+
+    // A test file that never settles must fail, not hang the whole run. Bun's
+    // runner does not exit on an await that can never resolve, so without this
+    // a single stuck file blocks the suite forever instead of reporting.
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      resolve({
+        file: rel,
+        code: 1,
+        signal: "SIGKILL",
+        ms: Date.now() - start,
+        output: `${output}\n[timed out after ${TEST_FILE_TIMEOUT_MS}ms — the file never settled]`,
+      });
+    }, TEST_FILE_TIMEOUT_MS);
+
     child.stdout.on("data", (d) => { output += d; });
     child.stderr.on("data", (d) => { output += d; });
     child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       resolve({ file: rel, code: code ?? 1, signal, ms: Date.now() - start, output });
     });
     child.on("error", (err) => {
-      resolve({ file: rel, code: 1, signal: null, ms: Date.now() - start, output: String(err) });
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ file: rel, code: 1, signal: null, ms: Date.now() - start, output: `${output}${String(err)}` });
     });
   });
 }
@@ -95,7 +123,7 @@ function parseArgs(argv) {
 
 const opts = parseArgs(process.argv.slice(2));
 let files = [
-  ...(opts.lib ? collectTests(LIB) : []),
+  ...(opts.lib ? [...collectTests(LIB), ...collectTests(SCRIPTS, [".test.ts"])] : []),
   ...(opts.wizard ? [...collectTests(path.join(WIZARD, "lib"), [".test.ts"]), ...collectTests(path.join(WIZARD, "app"), [".test.ts"])] : []),
 ];
 if (opts.filter) {

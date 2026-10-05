@@ -1,27 +1,27 @@
 # Frequently asked
 
-**What is LOADOUT?** A YSWS where shipping projects levels you up as a builder across technical tracks, and the Cores you earn buy better tech.
+**What is LOADOUT?** A technical builder YSWS where shipped projects become a persistent Digital Loadout and rewards build your Physical Loadout. The tagline is "build your own technical stack."
 
-**Is it a general build-anything program?** No. It is narrower than that. The project needs genuine technical depth, not just a wrapper around an existing service.
+**How many tracks are there?** Four: Tools, Systems, Compute, and Hardware. Research Mode is a modifier you apply to a project, not a fifth track. Each track records its own progress and caps at LV.15.
 
-**How many tracks are there?** Five: Compute, Systems, Hardware, Build, and Research. Your level is tracked per track, so your profile can look like `Compute LV.7 · Systems LV.4 · Hardware LV.3`.
+**Are there levels and what do they do?** Each track has 15 lifetime levels. Level determines pricing advantage, unlocks, and Requisition milestones. Levels are permanent and never reset between seasons.
 
-**What do levels actually do?** Levels unlock. Every 3 levels in a track earns a reduction coupon for that track, capped at a maximum of 25% reduction, and the higher your level the cheaper that track's shop items get for you.
+**What currency do I earn?** Bolts. Bolts are global and spendable; Track XP is separate, non-spendable, and stays in its field forever. Spending Bolts never weakens your Builder Profile.
 
-**What are Cores?** The spendable currency you earn from shipping projects and spend in the shop. Levels unlock, Cores buy.
+**How do projects earn Bolts?** Reviewed work contributes to track XP and global Bolts, judged on Originality, Technical Depth, Execution, and Documentation. Building must remain the main source of Bolts, and external traction earns a Signal Bonus.
 
-**How do I earn Cores?** Through four dimensions: Originality, Technicality, Execution, and Documentation. Better projects get higher multipliers, and projects that pick up real users, contributors, downloads, or adoption get bonuses on top.
+**How does pricing work?** Depth in a track gives better field pricing on that field. Most rewards stay available cross-track but cost more when bought outside your field, and permanent discounts stay modest and capped per item.
 
-**Can I use AI?** Yes, with a limit. AI can help but should not build the project for you; the current draft position is a maximum of 40% AI-generated implementation.
+**What are Requisitions?** Rare, one-use items that let a specialist push past the normal savings cap on expensive gear. They are earned at LV.3, LV.6, LV.9, LV.12, and LV.15, never expire, do not stack on one purchase, and never bypass a Custom Order level gate.
 
-**What if what I want is not in the shop?** Build enough and you unlock Custom Orders, which lets you request tech that is not in the catalogue. You still need the required Builder Level and Cores.
+**What if what I want is not in the shop?** After enough real building you can request it through Custom Orders. You still need enough Bolts, the relevant Track Level tier, program fit, and fulfillment approval. Tiers are FIELD at LV.4, POWER at LV.8, ROOT at LV.12, and BARE METAL at LV.15.
 
-**Can I work across tracks or with a team?** Multiple tracks is the normal case — levels are per track. For team projects, reviewers decide the final XP split, so ask a maintainer before you commit to a structure.
+**Can I work across tracks or with a team?** Yes, and it is normal. Reviewers decide the final XP percentage split for multi-track ships.
+
+**Can I use AI?** Yes, with a limit. AI can help but should not build the project for you; the cap is 40% AI-generated implementation.
 
 **When does it start?** The plan is feedback and website now, then RSVP and a small test, then sponsors and a pilot season, then full launch. No dates are confirmed.
 
 **How do I join?** RSVP at rsvp.soon.it/loadout and follow along in Slack `#loadout`. RSVP is interest, not acceptance.
 
 **How do I add something to the shop?** Post it in the Shop Suggestions tab. If it is already suggested, upvote the existing suggestion.
-
-**Is my work protected from AI-written submissions?** The AI cap applies to every builder equally. LOADOUT rewards work that a person actually built and documented.

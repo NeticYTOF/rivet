@@ -416,4 +416,96 @@ test("POST /internal/v1/programs/:id/incidents/manual creates only for a program
     else process.env.RIVET_INTERNAL_TOKEN = saved;
   }
 });
+test("no RIVET_DASHBOARD_PASSCODE → passcode login refuses instead of accepting a guessable default", async () => {
+  const serve = require("./serve");
+  const saved = process.env.RIVET_DASHBOARD_PASSCODE;
+  try {
+    delete process.env.RIVET_DASHBOARD_PASSCODE;
+    const res = await serve.handleRequest(
+      new Request("http://localhost/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "passcode=rivet",
+      }),
+    );
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get("Set-Cookie"), null, "an unconfigured passcode must never mint a session");
+    assert.match(await res.text(), /RIVET_DASHBOARD_PASSCODE/);
+
+    const page = await serve.handleRequest(new Request("http://localhost/login"));
+    assert.match(await page.text(), /RIVET_DASHBOARD_PASSCODE/, "the login page says why passcode login is off");
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_DASHBOARD_PASSCODE;
+    else process.env.RIVET_DASHBOARD_PASSCODE = saved;
+  }
+});
+
+test("a configured RIVET_DASHBOARD_PASSCODE still signs in — and the cookie is Secure off-loopback", async () => {
+  const serve = require("./serve");
+  const saved = process.env.RIVET_DASHBOARD_PASSCODE;
+  try {
+    process.env.RIVET_DASHBOARD_PASSCODE = "correct-horse";
+    const good = await serve.handleRequest(
+      new Request("https://rivet.example.com/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "passcode=correct-horse",
+      }),
+    );
+    assert.equal(good.status, 302);
+    const cookie = good.headers.get("Set-Cookie");
+    assert.ok(cookie.includes("rivet_sid="), "configured passcode still signs in");
+    assert.ok(cookie.includes("; Secure"), "an https session cookie is Secure");
+
+    const bad = await serve.handleRequest(
+      new Request("http://localhost/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "passcode=rivet",
+      }),
+    );
+    assert.equal(bad.status, 200);
+    assert.equal(bad.headers.get("Set-Cookie"), null);
+
+    const dev = await serve.handleRequest(
+      new Request("http://localhost/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "passcode=correct-horse",
+      }),
+    );
+    assert.ok(!dev.headers.get("Set-Cookie").includes("Secure"), "plain-HTTP loopback stays workable in dev");
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_DASHBOARD_PASSCODE;
+    else process.env.RIVET_DASHBOARD_PASSCODE = saved;
+  }
+});
+
+test("dev-testing auto-signin needs NODE_ENV=development, not just the sentinel client id", async () => {
+  const serve = require("./serve");
+  const cSaved = process.env.SLACK_CLIENT_ID;
+  const nSaved = process.env.NODE_ENV;
+  try {
+    process.env.SLACK_CLIENT_ID = "dev-testing";
+    delete process.env.NODE_ENV;
+    const refused = await serve.handleRequest(new Request("http://localhost/login"));
+    assert.equal(refused.status, 200, "no auto-session: the login page renders instead");
+    assert.equal(refused.headers.get("Set-Cookie"), null, "dev-testing alone must not mint an admin cookie");
+
+    process.env.NODE_ENV = "production";
+    const prod = await serve.handleRequest(new Request("http://localhost/login"));
+    assert.equal(prod.headers.get("Set-Cookie"), null, "NODE_ENV=production still refuses the auto-signin");
+
+    process.env.NODE_ENV = "development";
+    const allowed = await serve.handleRequest(new Request("http://localhost/login"));
+    assert.equal(allowed.status, 302);
+    assert.ok(allowed.headers.get("Set-Cookie").includes("rivet_sid="), "the dev affordance survives");
+  } finally {
+    if (cSaved === undefined) delete process.env.SLACK_CLIENT_ID;
+    else process.env.SLACK_CLIENT_ID = cSaved;
+    if (nSaved === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nSaved;
+  }
+});
+
 export {};

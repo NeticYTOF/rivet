@@ -45,26 +45,35 @@ test("the LOADOUT program stays inert until channels are claimed", () => {
   expect(program.channels ?? []).toEqual([]);
 });
 
-test("LOADOUT pins the economy rules that the corpus is graded on", () => {
+test("LOADOUT pins the canonical economy rules that the corpus is graded on", () => {
   const rules = loadout().pinnedRules.join("\n");
-  expect(rules).toContain("Cores");
-  expect(rules).toContain("25%");
-  expect(rules).toContain("Compute");
-  expect(rules).toContain("Research");
+  expect(rules).toContain("Bolts");
+  expect(rules).toContain("Tools");
+  expect(rules).toContain("LV.15");
+  expect(rules).toContain("Research Mode is a modifier");
 });
 
-test("the corpus states the currency and discount rule in prose, not only in config", () => {
-  const corpus = fs.readFileSync(path.join(ROOT, "loadout", "corpus", "02-tracks.md"), "utf8").toLowerCase();
-  expect(corpus).toContain("cores");
-  expect(corpus).toContain("25%");
-  expect(corpus).toContain("every 3 levels");
+test("the corpus states the canonical tracks and level cap in prose, not only in config", () => {
+  const corpus = fs.readFileSync(path.join(ROOT, "loadout", "corpus", "02-tracks.md"), "utf8");
+  for (const track of ["Tools", "Systems", "Compute", "Hardware"]) expect(corpus).toContain(track);
+  expect(corpus).toContain("LV.15");
+  expect(corpus).toContain("not a fifth track");
 });
 
-test("the corpus never reintroduces the superseded Bolts model", () => {
+test("the corpus never reintroduces the superseded Cores model", () => {
   const corpusDir = path.join(ROOT, "loadout", "corpus");
   const offenders = fs
     .readdirSync(corpusDir)
-    .filter((f) => f.endsWith(".md") && f !== "08-public-copy.md")
-    .filter((f) => /\bbolts?\b/i.test(fs.readFileSync(path.join(corpusDir, f), "utf8")));
+    .filter((f) => f.endsWith(".md"))
+    .filter((f) => /\bcores?\b/i.test(fs.readFileSync(path.join(corpusDir, f), "utf8")));
+  expect(offenders).toEqual([]);
+});
+
+test("the corpus never claims a fifth track or a per-3-level coupon", () => {
+  const corpusDir = path.join(ROOT, "loadout", "corpus");
+  const offenders = fs
+    .readdirSync(corpusDir)
+    .filter((f) => f.endsWith(".md"))
+    .filter((f) => /every 3 levels|25% reduction/i.test(fs.readFileSync(path.join(corpusDir, f), "utf8")));
   expect(offenders).toEqual([]);
 });

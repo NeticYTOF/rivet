@@ -30,5 +30,19 @@ export function timeoutFetch(
 ): Promise<Response> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
-  return fetch(input, { ...init, signal });
+
+  // Rely on the abort signal AND on a timer. The signal alone is not a
+  // sufficient bound: an abort is only observed by whoever happens to be
+  // listening, and the request is only actually cancelled if the underlying
+  // fetch honours it. Racing the promise guarantees the caller gets a thrown
+  // error at the deadline even when neither fires — which is the entire point
+  // of this module. Without the race, an unreachable host can hang the caller
+  // indefinitely, which is the failure this exists to prevent.
+  return Promise.race([
+    fetch(input, { ...init, signal }),
+    new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`request timed out after ${timeoutMs}ms`)), timeoutMs);
+      signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+    }),
+  ]);
 }

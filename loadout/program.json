@@ -16,12 +16,13 @@
   "requireGroundedAnswer": true,
   "status": "sandbox",
   "pinnedRules": [
-    "Cores are LOADOUT's spendable currency. Never call them Bolts, XP, or points.",
-    "There are five builder tracks: Compute, Systems, Hardware, Build, Research.",
-    "Every 3 levels in a track earns a reduction coupon for that track, capped at 25%.",
-    "Levels unlock, Cores buy.",
-    "Dates, eligibility, inventory, prices, sponsors, and participation numbers are unconfirmed. Never state them as fact.",
-    "Rivet must not answer with the superseded Bolts / four-track / Requisition model."
+    "Bolts are LOADOUT's global spendable currency. Never call them Cores, XP, or points.",
+    "There are four tracks: Tools, Systems, Compute, Hardware. Research Mode is a modifier, not a fifth track.",
+    "Each track has 15 lifetime levels and caps at LV.15.",
+    "Requisitions are earned at LV.3, LV.6, LV.9, LV.12 and LV.15, are one-use, and never bypass a Custom Order level gate.",
+    "Custom Order tiers are FIELD LV.4, POWER LV.8, ROOT LV.12, BARE METAL LV.15.",
+    "Track XP is non-spendable and permanent; spending Bolts never lowers a Builder Profile.",
+    "Dates, eligibility, inventory, prices, sponsors, and participation numbers are unconfirmed. Never state them as fact."
   ],
   "links": {
     "website": "https://loadout-jerry-team1.vercel.app/",

@@ -1,6 +1,6 @@
 # What counts as a LOADOUT project
 
-LOADOUT looks for original work with real technical depth, solid execution, and clear documentation. The four scoring dimensions are Originality, Technicality, Execution, and Documentation.
+LOADOUT is a technical-capability program, not a general build-anything program. A project has to expand technical capability for the builder or for other builders. The quality review considers **Originality, Technical Depth, Execution, and Documentation**.
 
 ## Fit examples
 
@@ -10,6 +10,10 @@ LOADOUT looks for original work with real technical depth, solid execution, and 
 - **Custom tool or runtime** — a new tool, framework, or system with original functionality. Higher fit.
 
 Capability examples that tend to fit well: renderer or netcode work, inference runtimes or GPU backends, and local-first sync. These are examples of project types, not claims about what participants have actually submitted.
+
+## Building it
+
+Keep an attributable journal as you build, then ship a working artifact. Hackatime and Lapse are the planned tracking tools.
 
 ## Unconfirmed
 

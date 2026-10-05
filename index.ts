@@ -9,6 +9,8 @@ const report = require("./lib/report");
 const web = require("./lib/web/serve");
 const db = require("./lib/db");
 const log = require("./lib/log");
+const doctor = require("./scripts/doctor.mjs");
+const programs = require("./lib/programs");
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -105,7 +107,6 @@ async function startBot() {
   log.info("bot", `connected via Socket Mode as ${botUserId}`);
 
   try {
-    const programs = require("./lib/programs");
     const channelList = programs.getChannelsList();
     for (const item of channelList) {
       if (item.channelId && item.channelId.startsWith("C")) {
@@ -129,12 +130,27 @@ async function startBot() {
   }
 }
 
-async function runAskCli(question: string): Promise<void> {
+async function runAskCli(question: string, programId: string | null): Promise<void> {
   validate({ needsSlack: false });
   db.open();
-  await knowledge.refreshCorpus();
 
-  const result = await respond.answerOrChat(question, "");
+  // Without a program the lookup resolves the shared corpus, which has no
+  // sources — so `--ask` would always decline and could never verify the
+  // corpus the bot actually answers from. Default to the only configured
+  // program when there is exactly one.
+  const program = programId ? programs.get(programId) : singleConfiguredProgram();
+  if (programId && !program) {
+    console.error(`[rivet] no program with id "${programId}" — check RIVET_PROGRAMS_JSON`);
+    process.exit(1);
+  }
+
+  await knowledge.refreshCorpus();
+  console.log(`[rivet] program: ${program ? program.id : "(shared)"}`);
+
+  const result = await respond.answerOrChat(question, "", {
+    program: program ? { id: program.id, name: program.name } : null,
+    inHelpChannel: Boolean(program),
+  });
   if (result?.answer) {
     console.log(`[rivet] source: ${result.source || "(conversational — not in docs)"}`);
     console.log(`[rivet] answer: ${result.answer}`);
@@ -142,6 +158,20 @@ async function runAskCli(question: string): Promise<void> {
   }
 
   console.log(`[rivet] would show the fallback: "${respond.MENTION_FALLBACK}"`);
+}
+
+function singleConfiguredProgram() {
+  const all = programs.all();
+  return all.length === 1 ? all[0] : null;
+}
+
+function runDoctorCli() {
+  const report = doctor.runDoctor();
+  console.log(doctor.render(report));
+  if (report.failures > 0) {
+    console.error("[rivet] fix the FAIL lines above, then start the bot again");
+    process.exit(1);
+  }
 }
 
 function main() {
@@ -153,16 +183,28 @@ function main() {
   if (askIdx !== -1) {
     const question = process.argv[askIdx + 1];
     if (!question) {
-      console.error('Usage: bun index.ts --ask "<question>"');
+      console.error('Usage: bun index.ts --ask "<question>" [--program <id>]');
       process.exit(1);
     }
-    runAskCli(question)
+    const programIdx = process.argv.indexOf("--program");
+    const programId = programIdx === -1 ? null : process.argv[programIdx + 1] || null;
+    runAskCli(question, programId)
       .then(() => process.exit(0))
       .catch((e) => {
         console.error("[rivet] --ask failed:", errorText(e));
         process.exit(1);
       });
     return;
+  }
+  const doctorIdx = process.argv.indexOf("--doctor");
+  if (doctorIdx !== -1) {
+    try {
+      runDoctorCli();
+    } catch (e) {
+      console.error("[rivet] --doctor failed:", errorText(e));
+      process.exit(1);
+    }
+    process.exit(0);
   }
 
   startBot().catch((e) => {

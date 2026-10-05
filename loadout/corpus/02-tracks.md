@@ -1,25 +1,22 @@
 # Builder tracks
 
-Every project belongs to a track, and every track levels you up independently. You can build across several tracks — your profile shows your level in each one.
+Every project belongs to a track, and each track records its own progress. Levels are permanent and each track caps at **LV.15**.
 
-## The five tracks
+## The four tracks
 
-- **Compute** — AI, GPUs, graphics, performance, inference.
-- **Systems** — servers, compilers, networking, infrastructure.
-- **Hardware** — PCBs, robotics, FPGA, embedded.
-- **Build** — apps, games, websites, creative tools.
-- **Research** — experiments, benchmarks, technical exploration.
+- **Tools** — developer tools, debuggers, SDKs, CLIs, and automation.
+- **Systems** — infrastructure, runtimes, networks, protocols, and databases.
+- **Compute** — GPU work, inference runtimes, graphics, and performance tooling.
+- **Hardware** — embedded systems, physical devices, robotics, and electronics.
 
-A profile looks like this: `Compute LV.7 · Systems LV.4 · Hardware LV.3`.
+**Research Mode is a modifier, not a fifth track.** Investigate a technical question and share reproducible technical outputs; the work still counts toward one of the four tracks.
 
-## Levels
+A Builder Profile reads like this: `Tools LV.7 · Systems LV.4 · Compute LV.9 · Hardware LV.3`, each out of 15.
 
-Building in a track raises that track's level. Levels are permanent — they do not reset between seasons — so a builder who keeps shipping in one area gets meaningfully better pricing in that area's part of the shop.
+## XP and levels
 
-## Levels unlock, Cores buy
+Track XP is non-spendable progress recorded separately in each track, and it stays in that field forever. Shipping raises it; the level follows the XP. Reviewers decide the final XP percentage split when a project spans more than one track — a ship split 70% Compute and 30% Systems adds the XP to each track accordingly.
 
-This is the whole economy in one line. Levels decide *what you can reach*; Cores decide *what you can afford*. A track level unlocks the deeper parts of the shop for that track, and the Cores you have earned from every project decide what you can actually purchase.
+## The principle
 
-## Discounts from levelling
-
-The higher your level in a track, the cheaper that track's shop items get for you. Every 3 levels you gain a reduction coupon for that track, and the coupon is capped at a maximum of 25% reduction. Specialising pays off: a Compute LV.12 builder pays noticeably less for Compute gear than a Compute LV.1 builder, and pays full price for Hardware gear they have not invested in.
+**Depth gives leverage. Breadth gives flexibility. Mastery gives access.** A builder who goes deep in one track gets better pricing and reaches Mastery gear in that track; a builder who spreads across tracks keeps flexibility and can still buy most things.

@@ -4,6 +4,34 @@ const log = require("../log");
 
 const COOKIE_NAME = "rivet_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEV_CLIENT_ID = "dev-testing";
+const DEV_USER_ID = "dev-user";
+const LOOPBACK_HOSTS: Record<string, true> = { "127.0.0.1": true, "[::1]": true, "0.0.0.0": true };
+
+// The passcode-free admin session is a developer affordance, not a feature: the
+// sentinel client id alone hands out admin cookies on a real deployment, so it
+// also requires the operator to have declared the box a development one.
+function devAuthEnabled(): boolean {
+  return process.env.SLACK_CLIENT_ID === DEV_CLIENT_ID && process.env.NODE_ENV === "development";
+}
+
+function sessionCookie(value: string, maxAgeSeconds: number, req: AuthRequest): string {
+  // Plain-HTTP loopback is the one case where `Secure` would break a real session:
+  // the browser refuses to return the cookie over http://localhost. Anything else
+  // (https, or http on an address someone else can reach) gets `Secure`.
+  let insecureLocal = false;
+  try {
+    const parsed = new URL(req.url);
+    if (parsed.protocol === "http:") {
+      const host = parsed.hostname.toLowerCase();
+      insecureLocal = host === "localhost" || host.endsWith(".localhost") || LOOPBACK_HOSTS[host] === true;
+    }
+  } catch {
+    insecureLocal = false;
+  }
+  const secure = insecureLocal ? "" : "; Secure";
+  return `${COOKIE_NAME}=${value}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax; HttpOnly${secure}`;
+}
 
 const sessions = new Map();
 
@@ -90,7 +118,7 @@ function requireAdmin(req: AuthRequest): AuthResult | { session: Session } {
 function isAdminSession(session: Session | null): boolean {
   if (!session) return false;
   if (session.role === "admin" || session.userId === "admin") return true;
-  if (process.env.SLACK_CLIENT_ID === "dev-testing" && session.userId === "dev-user") return true;
+  if (devAuthEnabled() && session.userId === DEV_USER_ID) return true;
   try {
     return isAdmin(session.userId);
   } catch (_) {
@@ -166,7 +194,7 @@ async function handleCallback(req: AuthRequest): Promise<AuthResult> {
     const userName = userData.name || userId;
     const cookieValue = signSession(userId, userName);
 
-    const setCookie = `${COOKIE_NAME}=${cookieValue}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`;
+    const setCookie = sessionCookie(cookieValue, SESSION_TTL_MS / 1000, req);
 
     return {
       status: 302,
@@ -178,8 +206,8 @@ async function handleCallback(req: AuthRequest): Promise<AuthResult> {
   }
 }
 
-function handleLogout() {
-  const setCookie = `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+function handleLogout(req: AuthRequest) {
+  const setCookie = sessionCookie("", 0, req);
   return {
     status: 302,
     headers: { "Set-Cookie": setCookie, Location: "/" },
@@ -196,4 +224,6 @@ export = {
   handleCallback,
   handleLogout,
   COOKIE_NAME,
+  devAuthEnabled,
+  sessionCookie,
 };

@@ -34,9 +34,32 @@ test("loginUrl includes client_id and state", () => {
 });
 
 test("handleLogout sets an expired cookie", () => {
-  const result = auth.handleLogout();
+  const result = auth.handleLogout(new Request("https://rivet.example.com/auth/logout"));
   assert.equal(result.status, 302);
   assert.ok(result.headers["Set-Cookie"]?.includes("Max-Age=0"));
+});
+
+test("session cookie is Secure except over plain-HTTP loopback", () => {
+  const https = auth.sessionCookie("tok", 604800, new Request("https://rivet.example.com/auth/callback"));
+  assert.match(https, /; Secure$/, "https sessions must be Secure");
+  assert.ok(https.includes("HttpOnly") && https.includes("SameSite=Lax"), "existing hardening is preserved");
+
+  for (const plain of [
+    "http://localhost:4100/login",
+    "http://127.0.0.1:4100/login",
+    "http://LOCALHOST:4100/login",
+    "http://[::1]:4100/login",
+    "http://app.localhost:4100/login",
+  ]) {
+    assert.ok(!auth.sessionCookie("tok", 604800, new Request(plain)).includes("Secure"), `${plain} is local dev`);
+  }
+
+  for (const remote of ["http://rivet.example.com/login", "http://192.168.1.9:4100/login"]) {
+    assert.ok(
+      auth.sessionCookie("tok", 604800, new Request(remote)).includes("Secure"),
+      `${remote} is not loopback, so Secure applies even on plain HTTP`,
+    );
+  }
 });
 
 test("sign/verify roundtrips in-process; tampered or malformed tokens fail", () => {
@@ -82,21 +105,33 @@ test("requireAdmin matrix — 401 no session, 403 non-admin, ok admin", () => {
   assert.equal(auth.requireSession(adminReq).userId, "admin");
 });
 
-test("dev-testing bypass is gated on SLACK_CLIENT_ID=dev-testing only", () => {
-  const saved = process.env.SLACK_CLIENT_ID;
+test("dev-testing only unlocks the passcode-free admin session under NODE_ENV=development", () => {
+  const cSaved = process.env.SLACK_CLIENT_ID;
+  const nSaved = process.env.NODE_ENV;
   try {
     process.env.SLACK_CLIENT_ID = "dev-testing";
-    const tok = auth.signSession("dev-user", "Developer", "admin");
+    delete process.env.NODE_ENV;
+    assert.equal(auth.devAuthEnabled(), false, "the sentinel client id alone must not unlock dev auth");
+    const tok = auth.signSession("dev-user", "Developer", "user");
     const req = { headers: { get: () => `${auth.COOKIE_NAME}=${tok}` } };
-    assert.ok(auth.requireAdmin(req).session, "dev-user passes while dev-testing");
+    assert.equal(auth.requireAdmin(req).status, 403, "dev-user is not admin without NODE_ENV=development");
+
+    process.env.NODE_ENV = "development";
+    assert.equal(auth.devAuthEnabled(), true);
+    assert.ok(auth.requireAdmin(req).session, "dev-user is admin while dev auth is fully enabled");
+
+    process.env.NODE_ENV = "production";
+    assert.equal(auth.devAuthEnabled(), false);
+    assert.equal(auth.requireAdmin(req).status, 403, "NODE_ENV=production is not development");
+
+    process.env.NODE_ENV = "development";
     process.env.SLACK_CLIENT_ID = "real-client-id";
-    const userTok = auth.signSession("dev-user", "Developer", "user");
-    const userReq = { headers: { get: () => `${auth.COOKIE_NAME}=${userTok}` } };
-    const out = auth.requireAdmin(userReq);
-    assert.ok(out.status === 403 || out.session, "outside dev-testing, a plain dev-user is 403 unless allowlisted");
+    assert.equal(auth.devAuthEnabled(), false, "a real client id never enables dev auth");
   } finally {
-    if (saved === undefined) delete process.env.SLACK_CLIENT_ID;
-    else process.env.SLACK_CLIENT_ID = saved;
+    if (cSaved === undefined) delete process.env.SLACK_CLIENT_ID;
+    else process.env.SLACK_CLIENT_ID = cSaved;
+    if (nSaved === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nSaved;
   }
 });
 
@@ -117,7 +152,7 @@ test("loginUrl needs Slack env; handleLogout clears the session cookie", () => {
     if (wSaved === undefined) delete process.env.RIVET_WEB_URL;
     else process.env.RIVET_WEB_URL = wSaved;
   }
-  const out = auth.handleLogout();
+  const out = auth.handleLogout(new Request("http://localhost:4100/auth/logout"));
   assert.equal(out.status, 302);
   assert.ok(out.headers["Set-Cookie"].includes(`${auth.COOKIE_NAME}=;`));
 });

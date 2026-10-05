@@ -168,10 +168,12 @@ Two suites, deliberately different runners.
 - **The Core↔Wizard contract is a hand-maintained mirror.** No shared package, no schema
   generation, no version negotiation. Response types, `OPEN_STATUSES`, the ticket status
   groups and the behavior defaults are all duplicated across both packages.
-- **`RIVET_DASHBOARD_PASSCODE` defaults to `"rivet"`** and `SLACK_CLIENT_ID="dev-testing"`
-  auto-signs an admin session with no passcode (`lib/web/serve.ts:367-382`). Both are dev
-  affordances that would be catastrophic in production; gate them explicitly.
-- **Session cookies set no `Secure` flag** (`lib/web/auth.ts:178`).
+- **The dashboard is console-locked unless configured.** Passcode login is disabled outright
+  when `RIVET_DASHBOARD_PASSCODE` is unset, and the `dev-testing` auto-signin additionally
+  requires `NODE_ENV=development` (`lib/web/auth.ts:11-16`). Deliberately fail-closed: with
+  neither set there is no way in, which is the correct production posture but surprises anyone
+  who expected the old `"rivet"` default. Session cookies carry `Secure` except on plain-HTTP
+  loopback (`lib/web/auth.ts:18-34`).
 - **Quota is reported, never enforced by Core.** Usage is metered in `llm_usage`; the
   allowance lives only in Wizard's `wizard_entitlements`.
 - `lib/identity.ts` is the bot's *self-description* corpus, not human identity resolution —
