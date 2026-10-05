@@ -30,6 +30,11 @@ interface CompletionOptions {
   maxTokens: number;
   temperature?: number;
   thinking?: unknown;
+  /** Reasoning budget, sent separately from max_tokens. Providers that reason
+   *  before answering need both: a budget big enough to reason in, and a
+   *  separate ceiling on the visible answer. */
+  reasoningEffort?: "max" | "high" | "low";
+  includeReasoning?: boolean;
   timeout?: number;
   fallback?: ProviderTier | null;
   telemetry?: Telemetry;
@@ -236,6 +241,8 @@ async function requestCompletion({
   maxTokens,
   temperature,
   thinking,
+  reasoningEffort,
+  includeReasoning,
   timeout,
 }: CompletionOptions): Promise<CompletionResult> {
   const usedKey = typeof apiKey === "function" ? apiKey() : apiKey;
@@ -249,6 +256,8 @@ async function requestCompletion({
         max_tokens: maxTokens,
         ...(temperature === undefined ? {} : { temperature }),
         ...(filteredThinking === undefined ? {} : { thinking: filteredThinking }),
+        ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
+        ...(includeReasoning === undefined ? {} : { include_reasoning: includeReasoning }),
         messages,
       },
       {
@@ -373,7 +382,18 @@ function parseSseChunk(buffer: string, { flush = false }: { flush?: boolean } = 
 }
 
 async function streamCompletion(
-  { baseUrl, apiKey, model, messages, maxTokens, temperature, thinking, timeout }: CompletionOptions,
+  {
+    baseUrl,
+    apiKey,
+    model,
+    messages,
+    maxTokens,
+    temperature,
+    thinking,
+    reasoningEffort,
+    includeReasoning,
+    timeout,
+  }: CompletionOptions,
   onDelta: (delta: string, text: string) => boolean | void,
 ) {
   const controller = new AbortController();
@@ -397,6 +417,8 @@ async function streamCompletion(
         stream: true,
         ...(temperature === undefined ? {} : { temperature }),
         ...(filteredThinking === undefined ? {} : { thinking: filteredThinking }),
+        ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
+        ...(includeReasoning === undefined ? {} : { include_reasoning: includeReasoning }),
         messages,
       }),
     });

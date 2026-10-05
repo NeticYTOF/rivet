@@ -42,12 +42,19 @@ interface IntentOptions {
   returnContext?: boolean;
 }
 
-// The classifier must emit a five-key JSON object (see parseContextResult),
-// which costs well over 100 tokens. A 20-token cap truncated every response
-// mid-object, so parsing always failed and every message came back null —
-// which the pipeline reads as "not a program question", i.e. a silent bot.
-// Reasoning models need far more again, since they emit reasoning first.
-const MAX_TOKENS = Math.max(20, Number(process.env.INTENT_MAX_TOKENS) || 300);
+// Budget for the visible reply, which is a five-key JSON object (see
+// parseContextResult) costing well over 100 tokens. A 20-token cap truncated
+// every response mid-object, so parsing always failed and every message came
+// back null — which the pipeline reads as "not a program question", i.e. a
+// silent bot.
+//
+// This is NOT a ceiling on thinking. Reasoning runs in a separate budget
+// (REASONING_EFFORT) and is not charged against these tokens, so a reasoning
+// model can deliberate as long as it wants while the emitted object stays
+// small. Verified: include_reasoning:false does not suppress deliberation on
+// DeepSeek V4 Flash, so the budget separation is the only lever that works.
+const MAX_TOKENS = Math.max(200, Number(process.env.INTENT_MAX_TOKENS) || 2000);
+const REASONING_EFFORT = (process.env.INTENT_REASONING_EFFORT || "max") as "max" | "high" | "low";
 const MIN_LENGTH = 5;
 // Bounded so a slow classifier can never stall a Slack reply. Overridable
 // because a self-hosted or cold provider can legitimately exceed 10s — and
@@ -81,7 +88,11 @@ Use HELP_NEEDED when the question is about ${name} itself, hardware/firmware dev
 If you cannot tell whether a question is about ${name} or not, answer OFF_TOPIC. Staying out of it is free.`
     : "";
 
-  return `You are the gate for rivet, a Slack bot in the ${name} channels at Hack Club. Rivet replies only when someone is actually asking a question or genuinely waiting for help with their project/code/setup, and stays completely silent otherwise.
+  return `Reason as long as you need to. Your final JSON object is the only thing that counts, and it must be the shortest correct answer.
+
+Output contract: emit ONLY the JSON object, with no prose, no markdown fence, and no field omitted. Use the shortest true value for every field — booleans rather than explanations, single words rather than phrases. Never restate the question or justify a choice.
+
+You are the gate for rivet, a Slack bot in the ${name} channels at Hack Club. Rivet replies only when someone is actually asking a question or genuinely waiting for help with their project/code/setup, and stays completely silent otherwise.
 
 You are shown the last few messages from one person, then the ONE message you have to judge. The earlier messages are context only — never judge them. Judge the final message.
 
@@ -302,6 +313,7 @@ async function classifyIntent(
         maxTokens: MAX_TOKENS,
         temperature: 0.3,
         thinking: { type: "disabled" },
+        reasoningEffort: REASONING_EFFORT,
         timeout: TIMEOUT_MS,
         messages: [
           { role: "system", content: intentSystemPrompt(program, { scoped }) },
