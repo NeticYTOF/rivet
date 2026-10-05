@@ -717,7 +717,7 @@ test("bare deferral pins current human_directed", () => {
   assert.equal(elig.humanDirected("just shipped my project!!", { botUserId: BOT }), false);
 });
 
-test("ping handoff pins current double-processing counts", async () => {
+test("a direct ping from either Slack event is answered once", async () => {
   process.env.RIVET_DB_PATH = ":memory:";
   const db = require("./db");
   try {
@@ -765,11 +765,8 @@ test("ping handoff pins current double-processing counts", async () => {
       client: {},
     });
     assert.equal(metrics.length, 0, "normal ping onMessage records no metric");
-    assert.equal(responds.length, 0, "normal ping onMessage never answers directly");
-    metrics = [];
-    gaps = [];
-    claims = [];
-    responds = [];
+    assert.equal(claims.length, 1, "message event claims the addressed message");
+    assert.equal(responds.length, 1, "message event handles the direct ping");
     await handlers.onAppMention({
       event: { ts: ts1, channel: "C0HELP", user: "U0ASKER", text: `<@${BOT}> how do i submit` },
       client: {},

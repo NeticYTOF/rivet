@@ -17,9 +17,8 @@
 //   3. Prints the remaining manual steps as plain text.
 //
 // Never prints, echoes, or writes a secret value — not into .env, not to
-// stdout. It reads no environment variable values at all; the only thing it
-// derives from config.ts is the NAMES of the required variables, via a child
-// process started from an empty environment.
+// stdout. The required-variable probe runs in an environment stripped of
+// secrets. The manifest uses only the non-secret bot name and command slug.
 //
 // ESM (.mjs) because the engine's other scripts/ files use require() and
 // scripts/package.json would otherwise flip the whole directory to ESM.
@@ -224,10 +223,10 @@ function main() {
     "Basic Information → App-Level Tokens → generate one with the connections:write",
     "  scope, and put it in SLACK_APP_TOKEN. Socket Mode dials out to Slack, so",
     "  there is no URL to deploy, no domain, and no tunnel.",
-    "Put your channel IDs in SLACK_HELP_CHANNEL and SLACK_FAQ_CHANNELS — the first",
-    "  entry of SLACK_FAQ_CHANNELS is the channel it answers in unprompted.",
-    "Fill in the model key named above — see docs/slack-setup.md step 4, which also",
-    "  flags a mismatch between .env.example and lib/config.ts.",
+    "Put your channel IDs in SLACK_FAQ_CHANNELS — the first entry is the main",
+    "  channel. SLACK_HELP_CHANNEL is optional for a dedicated support channel.",
+    "Set OPENCODE_API_KEY for the default intent/fallback tiers. HCAI_API_KEY is",
+    "  optional; see docs/slack-setup.md for the provider model settings.",
     "Load a program so it has something to answer from: RIVET_PROGRAMS_JSON takes",
     "  the program's JSON inline, not a file path — see docs/slack-setup.md.",
     "Verify without Slack: bun index.ts --ask \"how do I get started\"",

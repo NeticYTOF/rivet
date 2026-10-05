@@ -107,6 +107,23 @@ export function checkRequiredEnv(env) {
   );
 }
 
+export function checkSlackTokenFormats(env) {
+  const problems = [];
+  const botToken = String(env.SLACK_BOT_TOKEN || "").trim();
+  const appToken = String(env.SLACK_APP_TOKEN || "").trim();
+
+  if (botToken && !botToken.startsWith("xoxb-")) {
+    problems.push("SLACK_BOT_TOKEN must be the bot OAuth token beginning xoxb-");
+  }
+  if (appToken && !appToken.startsWith("xapp-")) {
+    problems.push("SLACK_APP_TOKEN must be the Socket Mode app-level token beginning xapp-; SLACK_SIGNING_SECRET is not used");
+  }
+
+  return problems.length > 0
+    ? result(FAIL, "Slack token formats", problems.join("; "))
+    : result(PASS, "Slack token formats", "bot and Socket Mode token prefixes look correct");
+}
+
 /**
  * Resolves which program config the bot would actually load, with the same
  * precedence and the same tolerance as lib/programs.ts.
@@ -208,6 +225,43 @@ export function checkClaimedChannels(loaded) {
   return result(WARN, "claimed channels", `${ids} claims no channels — Rivet will answer nothing anywhere. Set "channels": ["C..."] or "helpChannel": "C...".`);
 }
 
+export function checkFaqChannelOwnership(loaded, env = process.env) {
+  if (loaded.error || !loaded.programs) {
+    return result(PASS, "FAQ channel ownership", "no program config to compare with FAQ channels");
+  }
+
+  const claimed = new Set();
+  for (const prog of loaded.programs) {
+    if (!isRecord(prog)) continue;
+    for (const channel of Array.isArray(prog.channels) ? prog.channels : []) {
+      if (typeof channel === "string" && channel.trim()) claimed.add(channel.trim());
+    }
+    for (const channel of [
+      prog.helpChannel,
+      prog.help_channel,
+      prog.organizerChannel,
+      prog.organizer_channel,
+      prog.organizer_channel_id,
+    ]) {
+      if (typeof channel === "string" && channel.trim()) claimed.add(channel.trim());
+    }
+  }
+
+  const configured = [
+    ...String(env.SLACK_FAQ_CHANNELS || "").split(","),
+    env.SLACK_HELP_CHANNEL || "",
+  ].map((channel) => channel.trim()).filter(Boolean);
+  const unclaimed = [...new Set(configured.filter((channel) => !claimed.has(channel)))];
+  if (unclaimed.length === 0) {
+    return result(PASS, "FAQ channel ownership", "every configured FAQ/help channel belongs to a program");
+  }
+  return result(
+    WARN,
+    "FAQ channel ownership",
+    `${unclaimed.join(", ")} is not claimed by a program and will use shared knowledge; add it to that program or confirm shared mode is intentional`,
+  );
+}
+
 /**
  * Every `file://` source in the loaded config has to point at a file that is
  * still there. A renamed corpus file is otherwise silent: the source is
@@ -303,8 +357,10 @@ export function runDoctor(deps = {}) {
 
   const checks = [
     checkRequiredEnv(d.env),
+    checkSlackTokenFormats(d.env),
     checkProgramConfig(loaded),
     checkClaimedChannels(loaded),
+    checkFaqChannelOwnership(loaded, d.env),
     checkChannelRoles(d.env),
     checkCorpusFiles(loaded, d),
     checkDashboardPasscode(d.env),

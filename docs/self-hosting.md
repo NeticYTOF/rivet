@@ -14,9 +14,10 @@ hack on the code, but it doesn't get upstream fixes automatically. See
 
 Fork this repo on GitHub.
 
-You need one API key for the model that writes answers.
-[Hack Club AI](https://ai.hackclub.com/) is the sole provider — sign in with
-your Hack Club account, create one key, and keep it to hand.
+You need `OPENCODE_API_KEY` for the default intent classifier and fallback
+tiers. Hack Club AI is also supported: `HCAI_API_KEY` enables its answer tiers,
+and the per-task `HCAI_*_MODEL` variables select their models. See
+[`.env.example`](../.env.example) for the current provider settings.
 
 ## 2. Create the Slack app
 
@@ -25,16 +26,18 @@ writing it by hand:
 
 ```sh
 bun install
-RIVET_BOT_NAME="Sol" RIVET_BOT_SLUG=sol bun run manifest
+bun run manifest
 ```
 
-`RIVET_BOT_SLUG` becomes every slash command — `sol` gives you `/sol`,
-`/sol-teach`, `/sol-gaps`. Pick it now: renaming later means editing every
-command in Slack by hand.
+The default slug is `rivet`, producing `/rivet`, `/rivet-teach`, `/rivet-gaps`,
+and the other commands. If you choose another slug, set the same
+`RIVET_BOT_SLUG` in the deployment environment before generating the manifest;
+the installed commands and runtime listeners must match.
 
 One constraint that matters if your workspace already has a rivet-like bot in it:
 **slash command names are unique per workspace.** Two bots can't both own
-`/sol`. If the name is taken, the second app fails to install.
+`/rivet`. If the name is taken, choose another slug before generating the
+manifest.
 
 Then, in Slack:
 
@@ -59,8 +62,7 @@ One JSON value carries the whole thing — channels, docs, behaviour:
 [{
   "id": "example",
   "name": "Example",
-  "helpChannel": "C_HELP",
-  "channels": ["C_HELP", "C_MAIN"],
+  "channels": ["C_MAIN"],
   "posture": "active",
   "scope": "program",
   "sources": [
@@ -75,9 +77,9 @@ One JSON value carries the whole thing — channels, docs, behaviour:
 }]
 ```
 
-Minified, that becomes `RIVET_PROGRAMS_JSON`. Set it and the `programs.json` in
-this repo is ignored entirely — which is the whole reason a fork needs no code
-changes.
+Minified, that becomes `RIVET_PROGRAMS_JSON`. Set it to override the ignored
+`config/programs.json` fallback — the bundled `loadout/program.json` is an
+example and is not loaded automatically.
 
 **Source types.** `url` for a docs site (it follows subpages); `github-dir` for a
 directory of markdown via the GitHub contents API (add `siteUrl` to read the
@@ -114,21 +116,22 @@ Variables:
 ```sh
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
-SLACK_HELP_CHANNEL=C0SOLVE
-SLACK_FAQ_CHANNELS=C0SOLVE,C0CHAT     # first entry is the auto-reply channel
-HCAI_API_KEY=...
+SLACK_FAQ_CHANNELS=C_MAIN             # must match a configured program channel
+SLACK_HELP_CHANNEL=C_HELP              # optional dedicated help channel
+OPENCODE_API_KEY=...
 
-RIVET_BOT_NAME=Sol
-RIVET_BOT_SLUG=sol
+RIVET_BOT_NAME=rivet
+RIVET_BOT_SLUG=rivet
 RIVET_ADMIN_USER_IDS=U01ABCDEF        # your Slack user ID
 RIVET_DB_PATH=/data/rivet.db
-RIVET_PROGRAMS_JSON=[{"id":"solvable",...}]
+RIVET_PROGRAMS_JSON=[{"id":"example",...}]
 ```
 
-The first five are validated at boot; the process refuses to start without them
-and tells you which are missing. `SLACK_HELP_CHANNEL` and `SLACK_FAQ_CHANNELS`
-are still required even though your programs blob also names channels — that
-check predates the blob.
+The four listed provider and Slack values are validated at boot; the process
+refuses to start without them and names anything missing. `SLACK_HELP_CHANNEL`
+is optional; set it only for a dedicated channel that should reply to every
+top-level post. The `SLACK_APP_TOKEN` must be the Socket Mode `xapp-` token with
+`connections:write`; a Pixl `SLACK_SIGNING_SECRET` is not used by Rivet.
 
 `RIVET_ADMIN_USER_IDS` **fails closed**: leave it empty and nobody, including
 you, can teach the bot anything. Your Slack ID is in your Slack profile → three
@@ -136,8 +139,8 @@ dots → Copy member ID.
 
 [`.env.example`](./.env.example) documents everything else, all optional.
 
-Deploy. The logs should say `connected via Socket Mode as U…`, and your commands
-appear in Slack.
+Deploy. The logs should say `connected via Socket Mode as U…`, and the commands
+from the generated manifest should appear in Slack.
 
 ## 5. Check it actually works
 
@@ -145,7 +148,7 @@ A green build only means the process started.
 
 Invite the bot to any private channels by hand — it self-joins public ones on
 boot. Then ask it something your docs cover and confirm an answer comes back.
-`/sol-sources` shows what it managed to load, which is the fastest way to spot a
+`/rivet-sources` (or `/<your-slug>-sources`) shows what it managed to load, which is the fastest way to spot a
 docs URL that 404s.
 
 If it's quiet: `RIVET_DEBUG=1` for per-message logging, and check `posture` isn't
@@ -181,15 +184,15 @@ way to tell whether your sources are actually loading.
 
 Three ways, in increasing order of effort.
 
-**Teach it directly.** `/sol-teach how do i submit :: open a PR against the
+**Teach it directly.** `/rivet-teach how do i submit :: open a PR against the
 projects repo`. Available to `RIVET_ADMIN_USER_IDS` only, and it takes effect
 immediately.
 
 **Let it capture answers.** When a human answers a question the bot couldn't, it
-notices and queues that answer for review. `/sol-pending` lists the queue,
-`/sol-approve <n>` accepts one. Nothing enters the corpus unapproved.
+notices and queues that answer for review. `/rivet-pending` lists the queue,
+`/rivet-approve <n>` accepts one. Nothing enters the corpus unapproved.
 
-**Fix the docs.** `/sol-gaps` is the list of questions your documentation
+**Fix the docs.** `/rivet-gaps` is the list of questions your documentation
 couldn't answer, ranked by how often they were asked. That's a to-do list rather
 than a bug list — the point of the bot is partly to generate it.
 
@@ -218,13 +221,14 @@ who asked them in its SQLite database, so it can follow a conversation. That
 database lives on your volume, in your Railway project. Nothing is sent anywhere
 except to the model provider you configured. Tell your community it's there.
 
-**Model calls can be rate-limited.** This deployment uses one Hack Club AI key.
-If it is temporarily unavailable, the bot retries within its normal request budget
-and then returns a temporary-error response.
+**Model calls can be rate-limited.** The deployment uses the provider keys you
+configure, with optional HCAI and OpenCode key pools. If a provider is temporarily
+unavailable, the bot retries within its request budget and then returns a
+temporary-error response.
 
 **It can be wrong.** Everything is grounded in your docs and it's built
 throughout to say "I'm not sure" rather than guess — but a docs page that's out
-of date produces a confidently out-of-date answer. `/sol-reload` re-fetches
+of date produces a confidently out-of-date answer. `/rivet-reload` re-fetches
 without a restart.
 
 **Get the slug right the first time.** It's the one field that's genuinely

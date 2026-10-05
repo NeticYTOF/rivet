@@ -11,6 +11,7 @@ const db = require("./lib/db");
 const log = require("./lib/log");
 const doctor = require("./scripts/doctor.mjs");
 const programs = require("./lib/programs");
+const { startAfterReady } = require("./lib/startup");
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -78,7 +79,7 @@ async function startBot() {
     log.error("bolt", error.message);
   });
 
-  knowledge
+  const initialCorpusReady = knowledge
     .refreshCorpus()
     .then(() => warm.start())
     .catch((e: unknown) => log.error("knowledge", "initial corpus build failed:", errorText(e)));
@@ -102,7 +103,7 @@ async function startBot() {
     api.setSlackClient(app.client);
   }
 
-  await app.start();
+  await startAfterReady(initialCorpusReady, () => app.start());
   const botUserId = await resolveBotUserId(app.client);
   log.info("bot", `connected via Socket Mode as ${botUserId}`);
 

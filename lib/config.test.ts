@@ -58,6 +58,12 @@ test("zenStandby names Zen and the given model for a self-hosted gateway", () =>
   assert.equal(standby.model, "deepseek-v4-flash-free");
 });
 
+test("zenStandby preserves a task-specific model when building a provider fallback", () => {
+  const standby = zenStandby("http://custom-gateway.internal/v1", "gpt-4.1-nano");
+  assert.equal(standby.baseUrl, ZEN_BASE_URL);
+  assert.equal(standby.model, "gpt-4.1-nano");
+});
+
 test("the built-in model defaults are names Zen serves", () => {
   assert.ok(!DEFAULT_MODEL.includes("/"), `${DEFAULT_MODEL} is gateway-only`);
   assert.ok(!DEFAULT_VISION_MODEL.includes("/"), `${DEFAULT_VISION_MODEL} is gateway-only`);

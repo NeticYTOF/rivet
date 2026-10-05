@@ -15,6 +15,7 @@ if (process.env.RIVET_SKIP_DOTENV !== "1") dotenv.config();
 
 const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
 const DEFAULT_MODEL = "deepseek-v4-flash-free";
+const DEFAULT_INTENT_MODEL = "gpt-4.1-nano";
 
 const DEFAULT_VISION_MODEL = "mimo-v2.5-free";
 const DEFAULT_REFRESH_INTERVAL_MIN = 30;
@@ -97,7 +98,7 @@ function zenStandby(baseUrl: string, model = DEFAULT_MODEL): ProviderTier | null
   return {
     baseUrl: ZEN_BASE_URL,
     apiKey: () => nextZenApiKey(),
-    model: DEFAULT_MODEL,
+    model,
   };
 }
 
@@ -231,12 +232,13 @@ function collectHcaiKeys(env = process.env) {
 
 const hcaiApiKeys = collectHcaiKeys();
 
-function hcaiTier(model: string): ProviderTier {
+function hcaiTier(model: string, fallback: ProviderTier | null = null): ProviderTier {
   return {
-    apiKey: () => process.env.HCAI_API_KEY,
-    baseUrl: HCAI_BASE_URL,
+    apiKey: () => nextHcaiApiKey(),
+    baseUrl: normalizeBaseUrl(process.env.HCAI_BASE_URL, HCAI_BASE_URL),
     model,
     onRateLimited: penalizeHcaiKey,
+    fallback,
   };
 }
 
@@ -312,6 +314,28 @@ const nineRouterPingTier = {
   fallback: openRouterAnswerTier,
 };
 
+const legacyIntentTier = {
+  apiKey: () => {
+    if (process.env.INTENT_CLASSIFIER_API_KEY) return process.env.INTENT_CLASSIFIER_API_KEY;
+    if (intentBaseUrl === GROQ_BASE_URL) return nextGroqApiKey();
+    return nextZenApiKey();
+  },
+  baseUrl: intentBaseUrl,
+  model:
+    process.env.INTENT_CLASSIFIER_MODEL ||
+    (intentBaseUrl === GROQ_BASE_URL ? process.env.GROQ_MODEL || DEFAULT_GROQ_INTENT_MODEL : DEFAULT_INTENT_MODEL),
+  fallback: standbyFallback(intentBaseUrl, DEFAULT_INTENT_MODEL),
+  onRateLimited: intentBaseUrl === GROQ_BASE_URL ? penalizeGroqKey : penalizeZenKey,
+};
+
+const legacyVisionTier = {
+  apiKey: () => process.env.VISION_API_KEY || nextZenApiKey(),
+  baseUrl: visionBaseUrl,
+  model: process.env.RIVET_VISION_MODEL || DEFAULT_VISION_MODEL,
+  fallback: standbyFallback(visionBaseUrl, DEFAULT_VISION_MODEL),
+  onRateLimited: penalizeZenKey,
+};
+
 const config = {
   zenApiKeys,
   hcaiApiKeys,
@@ -329,38 +353,26 @@ const config = {
     adminUserIds,
   },
 
-  pingAnswer: nineRouterPingTier,
-  helpAnswer: nineRouterAnswerTier,
+  pingAnswer:
+    hcaiApiKeys.length > 0
+      ? hcaiTier(process.env.HCAI_PING_MODEL || process.env.HCAI_MODEL || DEFAULT_HCAI_MODEL, nineRouterPingTier)
+      : nineRouterPingTier,
+  helpAnswer:
+    hcaiApiKeys.length > 0
+      ? hcaiTier(process.env.HCAI_HELP_MODEL || process.env.HCAI_MODEL || DEFAULT_HCAI_MODEL, nineRouterAnswerTier)
+      : nineRouterAnswerTier,
   answer:
     hcaiApiKeys.length > 0
-      ? {
-          apiKey: () => nextHcaiApiKey(),
-          baseUrl: process.env.HCAI_BASE_URL || HCAI_BASE_URL,
-          model: process.env.HCAI_MODEL || DEFAULT_HCAI_MODEL,
-          onRateLimited: penalizeHcaiKey,
-          fallback: nineRouterAnswerTier,
-        }
+      ? hcaiTier(process.env.HCAI_MODEL || DEFAULT_HCAI_MODEL, nineRouterAnswerTier)
       : nineRouterAnswerTier,
-  intent: {
-    apiKey: () => {
-      if (process.env.INTENT_CLASSIFIER_API_KEY) return process.env.INTENT_CLASSIFIER_API_KEY;
-      if (intentBaseUrl === GROQ_BASE_URL) return nextGroqApiKey();
-      return nextZenApiKey();
-    },
-    baseUrl: intentBaseUrl,
-    model:
-      process.env.INTENT_CLASSIFIER_MODEL ||
-      (intentBaseUrl === GROQ_BASE_URL ? process.env.GROQ_MODEL || DEFAULT_GROQ_INTENT_MODEL : DEFAULT_MODEL),
-    fallback: standbyFallback(intentBaseUrl, DEFAULT_MODEL),
-    onRateLimited: intentBaseUrl === GROQ_BASE_URL ? penalizeGroqKey : penalizeZenKey,
-  },
-  vision: {
-    apiKey: () => process.env.VISION_API_KEY || nextZenApiKey(),
-    baseUrl: visionBaseUrl,
-    model: process.env.RIVET_VISION_MODEL || DEFAULT_VISION_MODEL,
-    fallback: standbyFallback(visionBaseUrl, DEFAULT_VISION_MODEL),
-    onRateLimited: penalizeZenKey,
-  },
+  intent:
+    hcaiApiKeys.length > 0 && process.env.HCAI_INTENT_MODEL
+      ? hcaiTier(process.env.HCAI_INTENT_MODEL, legacyIntentTier)
+      : legacyIntentTier,
+  vision:
+    hcaiApiKeys.length > 0
+      ? hcaiTier(process.env.HCAI_VISION_MODEL || DEFAULT_HCAI_VISION_MODEL, legacyVisionTier)
+      : legacyVisionTier,
 
   reportChannel: process.env.RIVET_REPORT_CHANNEL || null,
 
@@ -447,6 +459,7 @@ export = {
   DEFAULT_VISION_MODEL,
   DEFAULT_HCAI_MODEL,
   DEFAULT_HCAI_VISION_MODEL,
+  DEFAULT_INTENT_MODEL,
   DEFAULT_OPENROUTER_MODEL,
   DEFAULT_GROQ_MODEL,
   DEFAULT_GROQ_INTENT_MODEL,
