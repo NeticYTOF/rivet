@@ -32,7 +32,8 @@ const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 // Mirrors MODEL_VARS + SLACK_VARS in lib/config.ts, which is exactly what
 // validate() reports as missing. Order is the order validate() lists them in.
 const MODEL_VARS = ["OPENCODE_API_KEY"];
-const SLACK_VARS = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_HELP_CHANNEL", "SLACK_FAQ_CHANNELS"];
+// Matches SLACK_VARS in lib/config.ts. SLACK_HELP_CHANNEL is optional.
+const SLACK_VARS = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"];
 const REQUIRED_VARS = [...MODEL_VARS, ...SLACK_VARS];
 
 // lib/web/serve.ts falls back to this passcode, so "unset" and "rivet" are the

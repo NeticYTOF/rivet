@@ -91,7 +91,10 @@ test("missingVars reports every absent required var at once", () => {
     const missing = missingVars({ needsSlack: true });
     assert.ok(missing.includes("OPENCODE_API_KEY"));
     assert.ok(missing.includes("SLACK_BOT_TOKEN"));
-    assert.equal(missing.length, 5);
+    // SLACK_HELP_CHANNEL is optional: a program can run every channel in
+    // normal mode instead of replying to every top-level message.
+    assert.ok(!missing.includes("SLACK_HELP_CHANNEL"));
+    assert.equal(missing.length, 4);
   } finally {
     Object.assign(process.env, saved);
   }

@@ -154,7 +154,6 @@ test("every required variable is reported when the env is empty", () => {
     "OPENCODE_API_KEY",
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
-    "SLACK_HELP_CHANNEL",
     "SLACK_FAQ_CHANNELS",
   ]) {
     assert.ok(check.detail.includes(name), `${name} missing from: ${check.detail}`);
@@ -162,9 +161,17 @@ test("every required variable is reported when the env is empty", () => {
 });
 
 test("a whitespace-only variable counts as missing, as validate() treats it", () => {
-  const check = checkRequiredEnv({ ...COMPLETE_ENV, SLACK_HELP_CHANNEL: "   " });
+  const check = checkRequiredEnv({ ...COMPLETE_ENV, SLACK_FAQ_CHANNELS: "   " });
   assert.equal(check.status, "fail");
-  assert.ok(check.detail.includes("SLACK_HELP_CHANNEL"));
+  assert.ok(check.detail.includes("SLACK_FAQ_CHANNELS"));
+});
+
+test("an absent SLACK_HELP_CHANNEL is fine - every channel runs in normal mode", () => {
+  const env = { ...COMPLETE_ENV };
+  delete env.SLACK_HELP_CHANNEL;
+  const check = checkRequiredEnv(env);
+  assert.equal(check.status, "pass");
+  assert.ok(!check.detail.includes("SLACK_HELP_CHANNEL"));
 });
 
 test("a renamed corpus file is a failure naming the path", () => {

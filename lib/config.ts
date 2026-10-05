@@ -30,7 +30,10 @@ const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b";
 const DEFAULT_GROQ_INTENT_MODEL = "qwen/qwen3.8-27b";
 
-const SLACK_VARS = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_HELP_CHANNEL", "SLACK_FAQ_CHANNELS"];
+// SLACK_HELP_CHANNEL is optional: a help channel replies to every top-level
+// message, which is wrong for a program that only wants answers to real
+// questions. Omit it and every channel runs in normal mode.
+const SLACK_VARS = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"];
 const MODEL_VARS = ["OPENCODE_API_KEY"];
 
 function stripTrailingSlash(url: string) {
