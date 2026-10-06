@@ -12,6 +12,9 @@ function botName() {
 }
 
 function makerLine(programName: string) {
+  if (programName === "Loadout") {
+    return "A: Loadout was built by Netic, Wind, and Jerry, who are also the org behind it.";
+  }
   return `A: This bot is configured to help with ${programName}.`;
 }
 
