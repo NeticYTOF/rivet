@@ -15,6 +15,10 @@ The timeline will definitely change. Treat it as direction, not as dates.
 
 RSVP registers interest. It does not enroll you or accept you into the program.
 
+## Who is building Loadout
+
+Loadout is made by netic, wind, and jerry.
+
 ## Feedback the maintainers are asking for
 
 - Are the tracks good?

@@ -12,7 +12,7 @@ The shop is not final. Participants help decide what actually gets added.
 
 ## Shop suggestions
 
-A good LOADOUT shop contains stuff people actually want. If you want something added, post it in the Shop Suggestions tab. If someone already suggested it, upvote it instead of duplicating it.
+A good Loadout shop contains stuff people actually want. If you want something added, post it in the Shop Suggestions tab. If someone already suggested it, upvote it instead of duplicating it.
 
 ## Custom Orders
 

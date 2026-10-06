@@ -1,6 +1,6 @@
 # Frequently asked
 
-**What is LOADOUT?** A technical builder YSWS where shipped projects become a persistent Digital Loadout and rewards build your Physical Loadout. The tagline is "build your own technical stack."
+**What is Loadout?** A technical builder YSWS where shipped projects become a persistent Digital Loadout and rewards build your Physical Loadout. The tagline is "build your own technical stack."
 
 **How many tracks are there?** Four: Tools, Systems, Compute, and Hardware. Research Mode is a modifier you apply to a project, not a fifth track. Each track records its own progress and caps at LV.15.
 

@@ -1,6 +1,6 @@
-# What counts as a LOADOUT project
+# What counts as a Loadout project
 
-LOADOUT is a technical-capability program, not a general build-anything program. A project has to expand technical capability for the builder or for other builders. The quality review considers **Originality, Technical Depth, Execution, and Documentation**.
+Loadout is a technical-capability program, not a general build-anything program. A project has to expand technical capability for the builder or for other builders. The quality review considers **Originality, Technical Depth, Execution, and Documentation**.
 
 ## Fit examples
 

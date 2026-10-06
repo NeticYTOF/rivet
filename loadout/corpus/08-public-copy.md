@@ -1,20 +1,20 @@
 # Public copy
 
-Tightened LOADOUT copy for Slack Canvas and the website. Section headings are bold and underlined; related sentences stay in the same block instead of each thought taking its own paragraph.
+Tightened Loadout copy for Slack Canvas and the website. Section headings are bold and underlined; related sentences stay in the same block instead of each thought taking its own paragraph.
 
 ## Slack Canvas version
 
 Slack renders bold and underline together as `*_text_*`.
 
 ```text
-LOADOUT — a YSWS where every project levels you up as a builder.
+Loadout — a YSWS where every project levels you up as a builder.
 
 Build projects, grow your Builder Profile, and use what you earn to upgrade your setup.
 
 Status: early draft — gathering feedback, building the website, and looking for sponsors.
 
 *_The idea_*
-Most YSWSes reward the project you just made. LOADOUT rewards your progression as a builder. You ship projects across different technical tracks, you get track levels and Bolts that unlock and buy better tech, and levels unlock it while Bolts buy it. Depth gives leverage, breadth gives flexibility, mastery gives access: the deeper you go in a track, the better your field pricing on it.
+Most YSWS programs reward the project you just made. Loadout rewards your progression as a builder. You ship projects across different technical tracks, you get track levels and Bolts that unlock and buy better tech, and levels unlock it while Bolts buy it. Depth gives leverage, breadth gives flexibility, mastery gives access: the deeper you go in a track, the better your field pricing on it.
 
 *_Builder tracks_*
 Tools — developer tools, debuggers, SDKs, CLIs, automation.
@@ -43,24 +43,24 @@ AI can help, but it shouldn't build the project for you. The current draft posit
 Now — feedback and website. Next — RSVP and a small test. After — sponsors and a pilot season. Later — full launch.
 
 *_Shop suggestions_*
-A good LOADOUT shop should contain stuff people actually want. If you want something added, post it in the Shop Suggestions tab; if someone already suggested it, just upvote it.
+A good Loadout shop should contain stuff people actually want. If you want something added, post it in the Shop Suggestions tab; if someone already suggested it, just upvote it.
 
 *_Feedback wanted_*
 Are the tracks good? Would you care about levelling your Builder Profile? What would you actually save Bolts for? Should levels unlock different rewards? What feels too similar to another YSWS?
 
 Post ideas in #loadout 😺
 
-Your projects build your LOADOUT.
+Your projects build your Loadout.
 ```
 
 ## Website hero and section copy
 
 **Hero** — Build your own technical stack. Ship projects across technical tracks, grow your Digital Loadout, and equip your next harder build.
 
-**Sub** — LOADOUT is a YSWS where every shipped project levels you up as a builder. Earn Bolts from what you ship, then spend them on the hardware that makes the next build possible.
+**Sub** — Loadout is a YSWS where every shipped project levels you up as a builder. Earn Bolts from what you ship, then spend them on the hardware that makes the next build possible.
 
 **Tracks intro** — Pick a technical field and build depth in it. Levels unlock what you can reach; Bolts decide what you can afford.
 
 **Shop intro** — Levels unlock. Bolts buy. The higher you level in a track, the cheaper that track's items get for you.
 
-**Closing** — Your projects build your LOADOUT.
+**Closing** — Your projects build your Loadout.

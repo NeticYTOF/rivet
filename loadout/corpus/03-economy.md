@@ -12,9 +12,9 @@ Track XP cannot be spent, stays in its field forever, and is what determines lev
 
 ## How a project is rewarded
 
-Reviewed work contributes to both track XP and global Bolts. The quality review considers **Originality, Technical Depth, Execution, and Documentation** — these are the four dimensions LOADOUT retains, and the quality assessment feeds the planned Bolt multiplier.
+Reviewed work contributes to both track XP and global Bolts. The quality review considers **Originality, Technical Depth, Execution, and Documentation** — these are the four dimensions Loadout retains, and the quality assessment feeds the planned Bolt multiplier.
 
-External traction is rewarded through the **Signal Bonus**: projects that pick up real users, contributors, downloads, or adoption outside LOADOUT count for something.
+External traction is rewarded through the **Signal Bonus**: projects that pick up real users, contributors, downloads, or adoption outside Loadout count for something.
 
 ## Field pricing
 

@@ -1,12 +1,12 @@
-# LOADOUT — the program
+# Loadout — the program
 
-LOADOUT is a YSWS where every shipped project builds your stack. Work that expands technical capability for you or for other builders becomes a persistent **Digital Loadout**, and the rewards you buy with it become your **Physical Loadout**.
+Loadout is a YSWS where every shipped project builds your stack. Work that expands technical capability for you or for other builders becomes a persistent **Digital Loadout**, and the rewards you buy with it become your **Physical Loadout**.
 
-**The one-line version:** build your own technical stack. Your projects build your LOADOUT.
+**The one-line version:** build your own technical stack. Your projects build your Loadout.
 
 ## Status
 
-Early draft. LOADOUT is gathering feedback, building the website, and looking for sponsors. It is not running yet, and nothing here should be read as an acceptance, a date, or a promise of reward stock.
+Early draft. Loadout is gathering feedback, building the website, and looking for sponsors. It is not running yet, and nothing here should be read as an acceptance, a date, or a promise of reward stock.
 
 ## The loop
 
@@ -23,4 +23,4 @@ Your **Digital Loadout** is the set of artifacts you have shipped: the technical
 
 ## Who it is for
 
-Builders who want to expand their own technical capability, or other builders' capability. LOADOUT is narrower than a general build-anything program: the project has to be genuinely technical, not just a wrapper around an existing service.
+Builders who want to expand their own technical capability, or other builders' capability. Loadout is narrower than a general build-anything program: the project has to be genuinely technical, not just a wrapper around an existing service.

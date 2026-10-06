@@ -1,10 +1,10 @@
 {
   "id": "loadout",
-  "name": "LOADOUT",
+  "name": "Loadout",
   "scope": "program",
   "posture": "active",
-  "supportName": "LOADOUT",
-  "replySignature": "— rivet, LOADOUT's helper",
+  "supportName": "Rivet",
+  "replySignature": "",
   "aiAnswers": true,
   "ticketsEnabled": true,
   "autoEscalate": true,
@@ -16,13 +16,14 @@
   "requireGroundedAnswer": true,
   "status": "sandbox",
   "pinnedRules": [
-    "Bolts are LOADOUT's global spendable currency. Never call them Cores, XP, or points.",
+    "Bolts are Loadout's global spendable currency. Never call them Cores, XP, or points.",
     "There are four tracks: Tools, Systems, Compute, Hardware. Research Mode is a modifier, not a fifth track.",
     "Each track has 15 lifetime levels and caps at LV.15.",
     "Requisitions are earned at LV.3, LV.6, LV.9, LV.12 and LV.15, are one-use, and never bypass a Custom Order level gate.",
     "Custom Order tiers are FIELD LV.4, POWER LV.8, ROOT LV.12, BARE METAL LV.15.",
     "Track XP is non-spendable and permanent; spending Bolts never lowers a Builder Profile.",
-    "Dates, eligibility, inventory, prices, sponsors, and participation numbers are unconfirmed. Never state them as fact."
+    "Dates, eligibility, inventory, prices, sponsors, and participation numbers are unconfirmed. Never state them as fact.",
+    "Write the program name as 'Loadout', never 'LOADOUT'. Write 'Hack Club' and 'YSWS' - never 'hack club', 'yswe', or 'YSWSes'."
   ],
   "links": {
     "website": "https://loadout-jerry-team1.vercel.app/",
@@ -31,37 +32,37 @@
   },
   "sources": [
     {
-      "name": "LOADOUT — the program",
+      "name": "Loadout — the program",
       "type": "markdown",
       "url": "file://loadout/corpus/01-program.md"
     },
     {
-      "name": "LOADOUT — builder tracks",
+      "name": "Loadout — builder tracks",
       "type": "markdown",
       "url": "file://loadout/corpus/02-tracks.md"
     },
     {
-      "name": "LOADOUT — Cores and rewards",
+      "name": "Loadout — Bolts and rewards",
       "type": "markdown",
       "url": "file://loadout/corpus/03-economy.md"
     },
     {
-      "name": "LOADOUT — the shop",
+      "name": "Loadout — the shop",
       "type": "markdown",
       "url": "file://loadout/corpus/04-shop.md"
     },
     {
-      "name": "LOADOUT — what counts",
+      "name": "Loadout — what counts",
       "type": "markdown",
       "url": "file://loadout/corpus/05-eligibility.md"
     },
     {
-      "name": "LOADOUT — timeline",
+      "name": "Loadout — timeline",
       "type": "markdown",
       "url": "file://loadout/corpus/06-timeline.md"
     },
     {
-      "name": "LOADOUT — FAQ",
+      "name": "Loadout — FAQ",
       "type": "markdown",
       "url": "file://loadout/corpus/07-faq.md"
     }
