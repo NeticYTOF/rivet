@@ -80,7 +80,8 @@ async function fromLegacyIntent({
   // first silenced every such message, and the resulting log line reported
   // intent "human_conversation" - which reads as a classifier failure when the
   // classifier had in fact returned HELP_NEEDED.
-  if (result.verdict === intent.HELP_NEEDED) return { engage: true, intent: "support_question", error: null, source: "intent" };
+  if (result.verdict === intent.HELP_NEEDED)
+    return { engage: true, intent: "support_question", error: null, source: "intent" };
   if (result.directedAtHuman) return { engage: false, intent: "human_conversation", error: null, source: "intent" };
   if (result.verdict === intent.OFF_TOPIC)
     return { engage: false, intent: "unrelated_chatter", error: null, source: "intent" };
