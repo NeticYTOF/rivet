@@ -1,4 +1,5 @@
 import dotenv = require("dotenv");
+const { SLACK_VARS, MODEL_VARS } = require("./envContract.cjs");
 import type { WebClient } from "@slack/web-api";
 import type { ProviderTier } from "./types";
 
@@ -34,9 +35,6 @@ const DEFAULT_GROQ_INTENT_MODEL = "qwen/qwen3.8-27b";
 // SLACK_HELP_CHANNEL is optional: a help channel replies to every top-level
 // message, which is wrong for a program that only wants answers to real
 // questions. Omit it and every channel runs in normal mode.
-const SLACK_VARS = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"];
-const MODEL_VARS = ["OPENCODE_API_KEY"];
-
 function stripTrailingSlash(url: string) {
   return url.replace(/\/+$/, "");
 }

@@ -3,9 +3,9 @@
 // Run with: node scripts/test-diff.mjs
 // (No network or environment needed — pure logic.)
 
-import { REQUIRED_KEYS as REQUIRED, OPTIONAL_KEYS as OPTIONAL, diff } from "./railway-env-contract.mjs";
+import envContract from "../lib/envContract.cjs";
 
-const REQUIRED_LIST = ["OPENCODE_API_KEY", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"];
+const { MODEL_VARS, SLACK_VARS, REQUIRED_KEYS: REQUIRED, OPTIONAL_KEYS: OPTIONAL, diff } = envContract;
 const BASE_VARS = {
   OPENCODE_API_KEY: "x",
   SLACK_BOT_TOKEN: "x",
@@ -20,7 +20,7 @@ function eq(name, got, want) {
   else { fail++; console.error("  FAIL", name, "\n    got:", got, "\n    want:", want); }
 }
 
-eq("migration required vars match validate()", REQUIRED, REQUIRED_LIST);
+eq("required migration vars share the runtime model and Slack groups", REQUIRED, [...MODEL_VARS, ...SLACK_VARS]);
 
 eq("help channel and HCAI key are optional", [
   OPTIONAL.includes("SLACK_HELP_CHANNEL"),

@@ -708,6 +708,17 @@ function restoreFromDisk(source: SourceRecord) {
   return false;
 }
 
+function restoreCorpusFromDisk(sources: SourceRecord[] = loadSources()) {
+  let restored = 0;
+  for (const source of sources) {
+    // A dynamic source's cached copy must stay ineligible for exact claims
+    // until this boot's refresh succeeds or records a failure.
+    if (isDynamicSource(source)) continue;
+    if (restoreFromDisk(source)) restored += 1;
+  }
+  return { restored, total: sources.length };
+}
+
 function persistSourceText(source: SourceRecord, text: string) {
   try {
     const key = sourceCacheKey(source) || source.name;
@@ -1084,6 +1095,7 @@ export = {
   refreshCorpus,
   refreshSource,
   restoreFromDisk,
+  restoreCorpusFromDisk,
   sourceCacheKey,
   sourceFreshness,
   sourceEligibility,

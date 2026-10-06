@@ -14,6 +14,8 @@ import programsModule = require("./programs");
 import macrosModule = require("./macros");
 import channelPolicyModule = require("./channelPolicy");
 import workspaceModule = require("./workspace");
+import reactionHandlers = require("./reactionHandlers");
+import slackEventPolicy = require("./slackEventPolicy");
 import brand = require("./brand");
 import type { Program, SlackClient, Ticket } from "./types";
 
@@ -22,11 +24,6 @@ const { worthClassifying } = intent;
 interface SlackFile {
   mimetype?: string;
   url_private?: string;
-}
-interface ReactionItem {
-  channel: string;
-  ts: string;
-  type?: string;
 }
 interface HandlerEvent {
   ts: string;
@@ -40,12 +37,6 @@ interface HandlerEvent {
   bot_id?: string;
   team?: string;
   files?: SlackFile[];
-  item?: ReactionItem;
-  item_user?: string;
-  reaction?: string;
-}
-interface ReactionEvent extends HandlerEvent {
-  item: ReactionItem;
 }
 interface HandlerArgs {
   event: HandlerEvent;
@@ -181,11 +172,6 @@ function errorMessage(error: unknown): string | undefined {
   return typeof message === "string" ? message : undefined;
 }
 
-function errorData(error: unknown): Record<string, unknown> | undefined {
-  if (typeof error !== "object" || error === null || !("data" in error)) return undefined;
-  const data = (error as { data?: unknown }).data;
-  return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : undefined;
-}
 const context = contextModule as HandlerContext;
 const vision = visionModule as HandlerVision;
 const respond = respondModule as HandlerRespond;
@@ -198,21 +184,7 @@ const programs = programsModule as HandlerPrograms;
 const macros: HandlerMacros = macrosModule as HandlerMacros;
 const channelPolicy = channelPolicyModule as HandlerPolicy;
 const workspace = workspaceModule as HandlerWorkspace;
-
-const DELETE_REACTIONS = new Set(["x", "heavy_multiplication_x"]);
-const UP_REACTIONS = new Set([
-  "yay",
-  "thumbs-up",
-  "+1",
-  "yesyes",
-  "white_check_mark",
-  "heavy_check_mark",
-  "upvote",
-  "sparkling_heart",
-  "heart",
-  "heart_eyes",
-]);
-const DOWN_REACTIONS = new Set(["nono", "-1", "thumbsdown", "sad-pf"]);
+const { stagingBlocked } = slackEventPolicy;
 // event.item channel
 
 function escapeRegex(value: string): string {
@@ -766,12 +738,6 @@ async function handleSumRequest({
   }
 }
 
-function stagingBlocked(channel: string): boolean {
-  const allow = config.slack.stagingOnlyChannels;
-  if (!allow || allow.length === 0) return false;
-  return !allow.includes(channel);
-}
-
 const MACRO_NOTE_MAX_LENGTH = 280;
 
 function parseMacroTrigger(text: string): MacroTrigger | null {
@@ -1307,64 +1273,11 @@ async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
   });
 }
 
-async function messageAuthor(client: SlackClient, channel: string, ts: string): Promise<string | null> {
-  try {
-    const replies = await client.conversations?.replies?.({ channel, ts, limit: 1, inclusive: true });
-    if (replies?.messages?.[0]) return replies.messages[0].user || null;
-  } catch (e: unknown) {
-    log.debug("handlers", `replies lookup failed for ${ts}: ${errorMessage(e)}`);
-  }
-  try {
-    const hist = await client.conversations?.history?.({ channel, latest: ts, limit: 1, inclusive: true });
-    return hist?.messages?.[0]?.user || null;
-  } catch (e: unknown) {
-    log.debug("handlers", `history lookup failed for ${ts}: ${errorMessage(e)}`);
-    return null;
-  }
-}
-
-async function onReactionAdded({ event, client }: { event: ReactionEvent; client: SlackClient }): Promise<void> {
-  if (event.item && stagingBlocked(event.item.channel)) return;
-  const channel = event.item?.channel || event.channel;
-  const normReaction = (event.reaction || "").toLowerCase();
-
-  if (DELETE_REACTIONS.has(normReaction)) {
-    try {
-      const author = event.item_user || (await messageAuthor(client, channel, event.item.ts));
-
-      if (!author) {
-        log.warn("handlers", `delete reaction on ${event.item.ts}: could not tell who wrote it`);
-        return;
-      }
-      if (author !== config.slack.botUserId) return;
-
-      await client.chat.delete({ channel, ts: event.item.ts });
-      log.info("handlers", `deleted message ${event.item.ts} via reaction`);
-    } catch (e: unknown) {
-      log.warn("handlers", `could not delete ${event.item.ts}: ${errorData(e)?.error || errorMessage(e)}`);
-    }
-    return;
-  }
-
-  const vote = UP_REACTIONS.has(normReaction) ? 1 : DOWN_REACTIONS.has(normReaction) ? -1 : 0;
-  if (vote !== 0) {
-    db.recordFeedback(event.item.ts, event.user, vote);
-    log.info("feedback", `vote=${vote} ts=${event.item.ts} user=${event.user}`);
-  }
-}
-
-async function onReactionRemoved({ event }: { event: ReactionEvent }): Promise<void> {
-  const normReaction = (event.reaction || "").toLowerCase();
-  if (UP_REACTIONS.has(normReaction) || DOWN_REACTIONS.has(normReaction)) {
-    db.removeFeedback(event.item.ts, event.user);
-  }
-}
-
 export = {
   onMessage,
   onAppMention,
-  onReactionAdded,
-  onReactionRemoved,
+  onReactionAdded: reactionHandlers.onReactionAdded,
+  onReactionRemoved: reactionHandlers.onReactionRemoved,
   shouldConsiderThreadReply,
   mentionsRivetByName,
   mentionsRivetDirectly,

@@ -13,6 +13,8 @@ const doctor = require("./scripts/doctor.mjs");
 const programs = require("./lib/programs");
 const { startAfterReady } = require("./lib/startup");
 
+const INITIAL_CORPUS_STARTUP_TIMEOUT_MS = 30_000;
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -79,6 +81,12 @@ async function startBot() {
     log.error("bolt", error.message);
   });
 
+  let restoredCorpus = { restored: 0, total: 0 };
+  try {
+    restoredCorpus = knowledge.restoreCorpusFromDisk();
+  } catch (e: unknown) {
+    log.warn("knowledge", "could not restore cached corpus before startup:", errorText(e));
+  }
   const initialCorpusReady = knowledge
     .refreshCorpus()
     .then(() => warm.start())
@@ -103,7 +111,14 @@ async function startBot() {
     api.setSlackClient(app.client);
   }
 
-  await startAfterReady(initialCorpusReady, () => app.start());
+  await startAfterReady(initialCorpusReady, () => app.start(), {
+    timeoutMs: INITIAL_CORPUS_STARTUP_TIMEOUT_MS,
+    onTimeout: () =>
+      log.warn(
+        "knowledge",
+        `initial corpus refresh exceeded ${INITIAL_CORPUS_STARTUP_TIMEOUT_MS}ms; connecting with ${restoredCorpus.restored}/${restoredCorpus.total} cached sources while refresh continues`,
+      ),
+  });
   const botUserId = await resolveBotUserId(app.client);
   log.info("bot", `connected via Socket Mode as ${botUserId}`);
 

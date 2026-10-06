@@ -31,7 +31,9 @@
 // break them.
 
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
-import { REQUIRED_KEYS, OPTIONAL_KEYS, diff, redactedForLog } from "./railway-env-contract.mjs";
+import envContract from "../lib/envContract.cjs";
+
+const { REQUIRED_KEYS, OPTIONAL_KEYS, diff, redactedForLog } = envContract;
 
 const RAILWAY_API = "https://backboard.railway.com/graphql/v2";
 

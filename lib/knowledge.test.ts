@@ -93,6 +93,20 @@ test("source cache keys isolate URLs and inline content", () => {
   assert.match(knowledge.sourceCacheKey({ name: "No source" }), /::inline::/);
 });
 
+test("startup restores last-good source text before starting a network refresh", () => {
+  const source = { name: "Docs", type: "url", url: "https://example.invalid/docs" };
+  db.saveSourceText(knowledge.sourceCacheKey(source), "last good source text");
+
+  assert.deepEqual(knowledge.restoreCorpusFromDisk([source]), { restored: 1, total: 1 });
+});
+
+test("startup does not trust a dynamic source cache until this boot's refresh finishes", () => {
+  const source = { name: "Dynamic status", type: "url", url: "https://example.invalid/status", dynamic: true };
+  db.saveSourceText(knowledge.sourceCacheKey(source), "old status");
+
+  assert.deepEqual(knowledge.restoreCorpusFromDisk([source]), { restored: 0, total: 1 });
+});
+
 test("source eligibility uses the last successful copy and keeps dynamic copies stale", () => {
   const stable = { name: "Stable", type: "text", url: "https://example.invalid/stable" };
   const stableKey = knowledge.sourceCacheKey(stable);
