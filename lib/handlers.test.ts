@@ -790,7 +790,7 @@ test("a plain message naming Rivet in an unclaimed channel gets total silence", 
   assert.equal(posted.length, 0, "no reply, no escalation, nothing — the channel was never claimed");
 });
 
-test("an @-mention in an unclaimed channel gets total silence, even a sensitive one", async () => {
+test("an @-mention in an unclaimed channel reaches the safety path, never silence", async () => {
   const savedRespond = respond.respond;
   const posted: any[] = [];
   respond.respond = async (args: any) => void posted.push(args);
@@ -812,7 +812,10 @@ test("an @-mention in an unclaimed channel gets total silence, even a sensitive 
   } finally {
     respond.respond = savedRespond;
   }
-  assert.equal(posted.length, 0, "no answer, no escalation ticket — an unclaimed channel gets nothing");
+  // A direct mention is explicit consent to engage. The sensitive path
+  // (escalation, never an answer) must fire; total silence on a self-harm
+  // mention is the one outcome that is never acceptable.
+  assert.ok(posted.length > 0, "the safety path fired for an @-mention");
   assert.equal(db.getTicketByThreadTs("991.1", undefined), null, "no ticket was filed for the unclaimed channel");
 });
 

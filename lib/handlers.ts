@@ -1195,8 +1195,13 @@ async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
   const threadTs = event.thread_ts || event.ts;
 
   const policy = channelPolicy.resolve(event.channel, workspaceId);
-  const prog = policy.program;
-  if (!["help", "main", "organizer"].includes(policy.role)) return;
+  // A direct @-mention is explicit consent to reply, even in a channel the bot
+  // otherwise ignores. Without this, mentions in report-only rooms like
+  // #loadout-development die silently at the role gate below.
+  const mentionedOutside = policy.role === "none";
+  const prog = mentionedOutside ? programs.get("loadout") : policy.program;
+  if (!mentionedOutside && !["help", "main", "organizer"].includes(policy.role)) return;
+  if (!prog) return;
   if (policy.settings && policy.settings.enabled === false) return;
 
   if (db.wasAnswered(event.ts)) return;
