@@ -22,6 +22,7 @@ interface AnswerRequest {
   onRateLimited?: (...args: unknown[]) => void;
   maxTokens: number;
   thinking: { type: string };
+  reasoningEffort?: "max" | "high" | "low" | "minimal";
   messages: Array<{ role: string; content: string }>;
   telemetry: { operation: string; programId: string | null; channel: string | null };
 }
@@ -601,6 +602,11 @@ function answerRequest(
     onRateLimited: tier.onRateLimited,
     maxTokens: looksLikeCode(question) ? DEBUG_MAX_TOKENS : MAX_TOKENS,
     thinking: { type: "disabled" },
+    // DeepSeek reasons at full effort unless told otherwise, and the thinking
+    // block is invisible budget: a 900-token answer can cost thousands of
+    // reasoning tokens first. Minimal keeps deliberation; it just stops
+    // paying for depth the grounded-answer format cannot use.
+    reasoningEffort: "minimal",
     messages: [
       { role: "system", content: answerOrChatPrompt(corpus, additionalContext, inHelpChannel, program, channel) },
       { role: "user", content: question },
