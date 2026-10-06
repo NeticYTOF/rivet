@@ -1948,6 +1948,14 @@ function internalRetentionPolicy(programId: string, body: RetentionBody = {}): A
 }
 
 let slackChannelsCache: { at: number; channels: DashboardChannel[] } = { at: 0, channels: [] };
+// Failures need caching too. conversations.list is a rate-limited Slack
+// endpoint and the dashboard polls it; caching only successes meant a single
+// 429 produced an immediate retry loop that kept hammering the endpoint and
+// eventually took the process down. A short TTL on failure breaks the loop
+// while still recovering quickly once Slack stops throttling.
+let slackChannelsFailure: { at: number; reason: string } | null = null;
+const SLACK_CHANNELS_TTL_MS = 5 * 60 * 1000;
+const SLACK_CHANNELS_FAILURE_TTL_MS = 60 * 1000;
 
 const userInfoCache = new Map<string, UserInfo>();
 const USER_INFO_TTL_MS = 60 * 60 * 1000;
@@ -2045,8 +2053,11 @@ async function fetchSlackChannels(): Promise<ApiResponse> {
     return { ok: false, reason: "no SLACK_BOT_TOKEN in this environment", channels: [] };
   }
 
-  if (slackChannelsCache.channels.length && Date.now() - slackChannelsCache.at < 5 * 60 * 1000) {
+  if (slackChannelsCache.channels.length && Date.now() - slackChannelsCache.at < SLACK_CHANNELS_TTL_MS) {
     return { ok: true, channels: slackChannelsCache.channels };
+  }
+  if (slackChannelsFailure && Date.now() - slackChannelsFailure.at < SLACK_CHANNELS_FAILURE_TTL_MS) {
+    return { ok: false, reason: slackChannelsFailure.reason, channels: [] };
   }
 
   try {
@@ -2069,9 +2080,12 @@ async function fetchSlackChannels(): Promise<ApiResponse> {
 
     channels.sort((a, b) => a.name.localeCompare(b.name));
     slackChannelsCache = { at: Date.now(), channels };
+    slackChannelsFailure = null;
     return { ok: true, channels };
   } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e), channels: [] };
+    const reason = e instanceof Error ? e.message : String(e);
+    slackChannelsFailure = { at: Date.now(), reason };
+    return { ok: false, reason, channels: [] };
   }
 }
 
