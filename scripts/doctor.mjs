@@ -5,8 +5,8 @@
 //   bun index.ts --doctor        (or: bun scripts/doctor.mjs)
 //
 // Every check below mirrors a real code path, not a guess at one:
-//   required env   -> SLACK_VARS / MODEL_VARS, i.e. what validate() demands
-//                    (lib/config.ts)
+//   required env   -> the shared runtime/deployment contract
+//                    (lib/envContract.cjs, consumed by lib/config.ts)
 //   program JSON   -> the same two accepted shapes loadEnvPrograms() accepts
 //                    (lib/programs.ts), and the config/programs.json fallback
 //   file:// source -> resolveLocalPath()'s rules, outside-app-root included
@@ -26,15 +26,12 @@ import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
 const channelPolicy = require_("../lib/channelPolicy.ts");
+const envContract = require_("../lib/envContract.cjs");
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Mirrors MODEL_VARS + SLACK_VARS in lib/config.ts, which is exactly what
-// validate() reports as missing. Order is the order validate() lists them in.
-const MODEL_VARS = ["OPENCODE_API_KEY"];
-// Matches SLACK_VARS in lib/config.ts. SLACK_HELP_CHANNEL is optional.
-const SLACK_VARS = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"];
-const REQUIRED_VARS = [...MODEL_VARS, ...SLACK_VARS];
+// The runtime validator and Railway migration tool import the same contract.
+const REQUIRED_VARS = envContract.REQUIRED_KEYS;
 
 // lib/web/serve.ts falls back to this passcode, so "unset" and "rivet" are the
 // same weak login.

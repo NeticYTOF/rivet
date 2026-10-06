@@ -150,8 +150,10 @@ async function classify({
       });
       if (res && res.action !== "existing") return fromDecision(res, "vey");
     } catch (error: unknown) {
-      log.debug("engagement", `vey threw: ${error instanceof Error ? error.name : "Error"}`);
-      return { engage: false, intent: null, error: "unknown", source: "vey" };
+      log.warn(
+        "engagement",
+        `vey threw (${error instanceof Error ? error.name : "Error"}); falling back to the next classifier`,
+      );
     }
   }
   if (jevDecision.isEnabled()) {
@@ -163,10 +165,16 @@ async function classify({
         channelPosture: postureFor(role),
         addressed,
       });
-      if (res && res.action !== "existing") return fromJev(res);
+      if (res && res.action !== "existing") {
+        const decision = fromJev(res);
+        if (!decision.error) return decision;
+        log.warn("engagement", `jev classifier failed (${decision.error}); falling back to legacy intent`);
+      }
     } catch (error: unknown) {
-      log.debug("engagement", `jev threw: ${error instanceof Error ? error.name : "Error"}`);
-      return { engage: false, intent: null, error: "unknown", source: "jev" };
+      log.warn(
+        "engagement",
+        `jev threw (${error instanceof Error ? error.name : "Error"}); falling back to legacy intent`,
+      );
     }
   }
   return fromLegacyIntent({ message, program, userId, channel, addressed, threadMessages, recentMessages });

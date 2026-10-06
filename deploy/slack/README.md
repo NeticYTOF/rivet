@@ -145,7 +145,7 @@ an invention — that is the intended behaviour (`lib/respond.ts`).
 
 ## 6. Read the boot log
 
-Railway: service → **Deployments** → latest → **Logs**. A healthy boot ends with
+Railway: service → **Deployments** → latest → **Logs**. A typical boot ends with
 these three lines, in this order:
 
 ```
@@ -164,6 +164,12 @@ these three lines, in this order:
 - `connected via Socket Mode as U…` — `index.ts`, printed after `app.start()`
   (`index.ts`) and `auth.test` (`lib/config.ts`). The `U…` is the bot
   user id. If this line is missing, the process did not finish starting.
+
+The bot waits up to 30 seconds for its initial corpus refresh before opening
+Socket Mode. If a slow source exceeds that limit, the log says it is connecting
+while the refresh continues. It restores stable last-good source copies first,
+when available; dynamic sources wait for a fresh result before they can support
+exact claims. Check the corpus refresh line later to confirm every source loaded.
 
 `missing required environment variable: …` anywhere in the log means step 4 is
 incomplete — the message names the exact variables (`lib/config.ts`).

@@ -23,6 +23,8 @@ const BETA = {
 const db = require("../db");
 const programs = require("../programs");
 const jevDecision = require("../jevDecision");
+const veyDecision = require("../veyDecision");
+const intent = require("../intent");
 const lookup = require("../lookup");
 const tickets = require("../tickets");
 const context = require("../context");
@@ -95,6 +97,9 @@ let handOffs: TestRecord[];
 let jevCalls: DecisionArgs[];
 let answerCalls: TestRecord[];
 let jevMode: string;
+let veyMode: string;
+let legacyMode: string;
+let legacyCalls: number;
 
 function client() {
   return {
@@ -145,12 +150,33 @@ beforeEach(() => {
   jevCalls = [];
   answerCalls = [];
   jevMode = "script";
+  veyMode = "disabled";
+  legacyMode = "unavailable";
+  legacyCalls = 0;
+  stub(veyDecision, "isEnabled", () => veyMode !== "disabled");
+  stub(veyDecision, "evaluateSupportDecision", async () => {
+    if (veyMode === "throw") throw new Error("unexpected Vey error");
+    return { action: "existing", intent: null, errorKind: null };
+  });
   stub(jevDecision, "isEnabled", () => true);
   stub(jevDecision, "evaluateSupportDecision", async (args: DecisionArgs) => {
     jevCalls.push(args);
+    if (jevMode === "throw") throw new Error("Jev request failed");
     if (jevMode === "error") return { action: "error", errorKind: "timeout" };
     const hit = JEV[String(args.message).toLowerCase()];
     return hit ? { ...hit } : { action: "silence", intent: "unrelated_chatter" };
+  });
+  stub(intent, "classifyIntentContext", async () => {
+    legacyCalls += 1;
+    return legacyMode === "help"
+      ? {
+          verdict: intent.HELP_NEEDED,
+          addressedToRivet: false,
+          directedAtHuman: false,
+          recentRivetParticipation: false,
+          programRelevance: "relevant",
+        }
+      : null;
   });
   stub(lookup, "knownAnswer", () => null);
   stub(
@@ -329,11 +355,37 @@ test("a threaded reply uses its thread, not the channel history", async () => {
   expect(historyCalled).toBe(false);
 });
 
-test("main ambient: classifier outage fails closed (silence)", async () => {
+test("main ambient: Jev outage falls back to the legacy intent classifier", async () => {
+  jevMode = "error";
+  legacyMode = "help";
+  expect(await send({ channel: "C_ACME_MAIN", text: "what is restoration energy?" })).toBe(true);
+  expect(legacyCalls).toBe(1);
+  expect(answerCalls[0].program).toBe("acme");
+  expect(postedText()).toContain("Restoration Energy");
+});
+
+test("main ambient: message stays silent when both classifiers are unavailable", async () => {
   jevMode = "error";
   expect(await send({ channel: "C_ACME_MAIN", text: "what is restoration energy?" })).toBe(false);
+  expect(legacyCalls).toBe(1);
   expect(answerCalls).toHaveLength(0);
   expect(posts).toHaveLength(0);
+});
+
+test("main ambient: an unexpected Jev exception falls back to legacy intent", async () => {
+  jevMode = "throw";
+  legacyMode = "help";
+  expect(await send({ channel: "C_ACME_MAIN", text: "what is restoration energy?" })).toBe(true);
+  expect(legacyCalls).toBe(1);
+  expect(postedText()).toContain("Restoration Energy");
+});
+
+test("main ambient: an unexpected Vey exception falls through to Jev", async () => {
+  veyMode = "throw";
+  expect(await send({ channel: "C_ACME_MAIN", text: "what is restoration energy?" })).toBe(true);
+  expect(jevCalls).toHaveLength(1);
+  expect(postedText()).toContain("Restoration Energy");
+  expect(legacyCalls).toBe(0);
 });
 
 test("the classifier never receives documentation", async () => {
