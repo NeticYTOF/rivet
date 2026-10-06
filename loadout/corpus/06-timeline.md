@@ -17,7 +17,7 @@ RSVP registers interest. It does not enroll you or accept you into the program.
 
 ## Who is building Loadout
 
-Loadout is made by netic, wind, and jerry.
+Loadout is made by Netic, Wind, and Jerry, and they are also the org behind it.
 
 ## Feedback the maintainers are asking for
 

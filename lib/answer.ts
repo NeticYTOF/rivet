@@ -54,7 +54,7 @@ const answerFallbackWithHeadroom = config.answer.fallback
   : null;
 
 const DEFAULT_EMOJI =
-  ":cryin: :sob: :sobson: :son-: :pf: :yuh: :yay: :wiltedrose: :noooo: :fear: :pls: :hehepepe: :lmaocry: :angy: " +
+  ":cryin: :sob: :sobson: :son-: :pf: :yay: :wiltedrose: :noooo: :fear: :pls: :hehepepe: :lmaocry: :angy: " +
   ":3d-sad-emoji: :prayge: :hmmcat: :heartbreak: :sonbaby: :hm: :loll: :sb: :cry-cursed: :siren1: :bulb: :yesyes: " +
   ":vro: :meffmoney: :woooo: :oke: :pweas: :thonk: :ban: :sho: :shocked:";
 const CASUAL_EMOJI = (process.env.RIVET_EMOJI || DEFAULT_EMOJI).trim();
@@ -204,7 +204,7 @@ function timelineAuthorityRule(marker: string, alwaysLabel = "covered", program:
 const VOICE = [
   "Voice: you talk like a chill teenager texting in Slack, not like customer support copy. Casual, short, contractions, lowercase is fine. Never just reformat the FAQ answer into a stiff formal sentence — say it like a real person quickly typing a reply.",
   "Punctuation: never use dashes. No em dashes, no en dashes, no ' -- '. Where you'd reach for one, use a comma, a full stop, or start a new sentence. Ordinary hyphens inside words and inside commands are fine and must be left alone.",
-  `Only use these Slack emoji, never any others. 0-2 per reply where they fit the mood, vary them, never force one in: ${CASUAL_EMOJI}`,
+  `Only use these Slack emoji, never any others. At most 1 emoji per reply, at the very end only, never mid-sentence. Pick a different one each reply - repeating the same emoji in consecutive messages is the worst thing you can do. Most replies need zero emoji. Skip it entirely unless it fits perfectly: ${CASUAL_EMOJI}`,
 ];
 
 function systemPrompt(

@@ -4,6 +4,8 @@
 
 **How many tracks are there?** Four: Tools, Systems, Compute, and Hardware. Research Mode is a modifier you apply to a project, not a fifth track. Each track records its own progress and caps at LV.15.
 
+**Who made Loadout?** Loadout was built by Netic, Wind, and Jerry, who are also the org behind it.
+
 **Are there levels and what do they do?** Each track has 15 lifetime levels. Level determines pricing advantage, unlocks, and Requisition milestones. Levels are permanent and never reset between seasons.
 
 **What currency do I earn?** Bolts. Bolts are global and spendable; Track XP is separate, non-spendable, and stays in its field forever. Spending Bolts never weakens your Builder Profile.

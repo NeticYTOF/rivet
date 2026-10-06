@@ -14,6 +14,8 @@ interface LoadoutSource {
 interface LoadoutProgram {
   id: string;
   scope?: string;
+  supportName?: string;
+  replySignature?: string;
   channels?: string[];
   helpChannel?: string;
   sources: LoadoutSource[];
@@ -63,6 +65,25 @@ test("LOADOUT pins the canonical economy rules that the corpus is graded on", ()
   expect(rules).toContain("Tools");
   expect(rules).toContain("LV.15");
   expect(rules).toContain("Research Mode is a modifier");
+});
+
+test("the bot displays as Rivet and signs nothing", () => {
+  const program = loadout();
+  expect(program.supportName).toBe("Rivet");
+  expect(program.replySignature || "").toBe("");
+});
+
+test("the pinned rules name the makers and the casing rules", () => {
+  const rules = loadout().pinnedRules.join("\n");
+  for (const maker of ["Netic", "Wind", "Jerry"]) expect(rules).toContain(maker);
+  expect(rules).toContain("'Loadout', never 'LOADOUT'");
+  expect(rules).toContain("'YSWS'");
+});
+
+test("the makers and their org role are stated in prose, not only in rules", () => {
+  const corpus = fs.readFileSync(path.join(ROOT, "loadout", "corpus", "06-timeline.md"), "utf8");
+  expect(corpus).toContain("Netic, Wind, and Jerry");
+  expect(corpus).toContain("also the org");
 });
 
 test("the corpus states the canonical tracks and level cap in prose, not only in config", () => {
