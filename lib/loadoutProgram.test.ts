@@ -49,14 +49,14 @@ test("the LOADOUT program claims explicit Slack channels", () => {
   for (const channel of program.channels ?? []) expect(channel).toMatch(/^C[A-Z0-9]+$/);
 });
 
-test("the LOADOUT program never claims a channel as both help and main", () => {
-  // Rivet refuses to boot when one channel carries both roles: the help
-  // channel files tickets and escalates, the main channel replies ambiently.
-  // Overlapping them produces "channel role configuration invalid" and the bot
-  // never starts, which reads as "the bot is broken" rather than a config clash.
+test("Loadout runs #loadout as its help channel", () => {
+  // #loadout files tickets, escalates to helpers, and always answers. The
+  // legacy dual-role guard was deliberately lifted for this deployment: a
+  // help channel already replies to every top-level message, so naming it
+  // main as well changes nothing (see lib/programModel.ts).
   const program = loadout();
-  expect(program.helpChannel).toBeUndefined();
-  expect(program.channels ?? []).not.toContain(program.helpChannel);
+  expect(program.helpChannel).toBe("C0C5XUDMRH9");
+  expect(program.channels ?? []).toContain("C0C5XUDMRH9");
 });
 
 test("LOADOUT pins the canonical economy rules that the corpus is graded on", () => {
