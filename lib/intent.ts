@@ -54,7 +54,7 @@ interface IntentOptions {
 // small. Verified: include_reasoning:false does not suppress deliberation on
 // DeepSeek V4 Flash, so the budget separation is the only lever that works.
 const MAX_TOKENS = Math.max(200, Number(process.env.INTENT_MAX_TOKENS) || 2000);
-const REASONING_EFFORT = (process.env.INTENT_REASONING_EFFORT || "max") as "max" | "high" | "low";
+const REASONING_EFFORT = (process.env.INTENT_REASONING_EFFORT || "low") as "max" | "high" | "low";
 const MIN_LENGTH = 5;
 // Bounded so a slow classifier can never stall a Slack reply. Overridable
 // because a self-hosted or cold provider can legitimately exceed 10s — and

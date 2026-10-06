@@ -31,40 +31,9 @@
 // break them.
 
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { REQUIRED_KEYS, OPTIONAL_KEYS, diff, redactedForLog } from "./railway-env-contract.mjs";
 
 const RAILWAY_API = "https://backboard.railway.com/graphql/v2";
-
-const REQUIRED_KEYS = [
-  "SLACK_BOT_TOKEN",
-  "SLACK_APP_TOKEN",
-  "SLACK_HELP_CHANNEL",
-  "SLACK_FAQ_CHANNELS",
-  "HCAI_API_KEY",
-];
-
-const OPTIONAL_KEYS = [
-  "RIVET_BOT_NAME",
-  "RIVET_BOT_SLUG",
-  "RIVET_PROGRAMS_JSON",
-  "HCAI_MODEL",
-  "HCAI_PING_MODEL",
-  "HCAI_HELP_MODEL",
-  "HCAI_INTENT_MODEL",
-  "HCAI_VISION_MODEL",
-  "RIVET_ADMIN_USER_IDS",
-  "RIVET_FEEDBACK_REACTIONS",
-  "RIVET_ESCALATE_REACTION",
-  "RIVET_REPORT_CHANNEL",
-  "REFRESH_INTERVAL_MIN",
-  "FIRECRAWL_API_KEY",
-  "RIVET_IDENTITY_OVERRIDE",
-  "RIVET_DB_PATH",
-  "SLACK_CLIENT_ID",
-  "SLACK_CLIENT_SECRET",
-  "RIVET_WEB_URL",
-  "RIVET_WEB_PORT",
-  "RIVET_SESSION_SECRET",
-];
 
 function required(name) {
   const v = process.env[name];
@@ -126,66 +95,6 @@ function loadFile(path) {
     console.error(`error: ${path} is not valid JSON: ${err.message}`);
     process.exit(2);
   }
-}
-
-function diff(current, desired) {
-  const known = new Set([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
-
-  const out = { missing: [], mismatch: [], unexpected: [], extra: [], wouldSet: [] };
-  const seen = new Set();
-
-  // The full set of keys to consider: every known key, every key the FILE
-  // provides (even if unknown to us), and every key the current project
-  // already has. Required keys are always considered even when both sides
-  // are empty, because a missing required key is what the user actually
-  // needs to see — "you forgot to fill this in."
-  const allKeys = new Set([...REQUIRED_KEYS, ...OPTIONAL_KEYS, ...Object.keys(current), ...Object.keys(desired)]);
-
-  for (const key of allKeys) {
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const have = current[key];
-    const want = desired[key];
-    const wantIsEmpty = want === undefined || want === null || want === "";
-    const haveIsEmpty = have === undefined || have === null || have === "";
-
-    if (wantIsEmpty) {
-      // Required keys are special: a missing required is a hard error
-      // regardless of whether anything was set before. Catch the case
-      // where the FILE simply hasn't filled it in.
-      if (REQUIRED_KEYS.includes(key) && !haveIsEmpty) {
-        // have set, FILE empty — counts as extra on the project, the user
-        // should know not to lose it
-        out.extra.push(key);
-      } else if (REQUIRED_KEYS.includes(key) && haveIsEmpty) {
-        out.missing.push(key);
-      } else if (!haveIsEmpty) {
-        out.extra.push(key);
-      }
-      continue;
-    }
-    if (haveIsEmpty) {
-      if (REQUIRED_KEYS.includes(key)) out.missing.push(key);
-      else out.wouldSet.push(key);
-      continue;
-    }
-    if (String(have) !== String(want)) out.mismatch.push({ key, have: redactedForLog(have), want: redactedForLog(want) });
-  }
-
-  for (const key of Object.keys(desired)) {
-    if (!known.has(key)) out.unexpected.push(key);
-  }
-  return out;
-}
-
-// Slacks the diff output a bit — doesn't print the actual token, just its shape
-// and length — so a copy-pasted run-log is less of a leak.
-function redactedForLog(value) {
-  const s = String(value);
-  if (s.length === 0) return "<empty>";
-  if (s.length <= 8) return `${s.length} chars: ${"*".repeat(s.length)}`;
-  return `${s.length} chars: ${s.slice(0, 3)}…${"*".repeat(Math.max(0, s.length - 7))}`;
 }
 
 function printDiff(diff) {

@@ -1087,7 +1087,10 @@ async function onMessage({ event, client }: HandlerArgs): Promise<void> {
     return;
   }
 
-  if (pinged) return;
+  if (pinged) {
+    await onAppMention({ event, client });
+    return;
+  }
 
   if (isDm) {
     if (!(await checkDmRateLimit({ event, client, program: prog, threadTs: event.thread_ts || undefined }))) return;

@@ -1,54 +1,17 @@
-// Verifies the diff function in scripts/migrate-railway.js.
+// Verifies the env contract and diff shared with scripts/migrate-railway.mjs.
 //
 // Run with: node scripts/test-diff.mjs
 // (No network or environment needed — pure logic.)
 
-const REQUIRED = ["SLACK_BOT_TOKEN","SLACK_APP_TOKEN","SLACK_HELP_CHANNEL","SLACK_FAQ_CHANNELS","HCAI_API_KEY"];
-const OPTIONAL = ["RIVET_BOT_NAME","RIVET_BOT_SLUG","RIVET_PROGRAMS_JSON","RIVET_DB_PATH","RIVET_FEEDBACK_REACTIONS","HCAI_MODEL","HCAI_PING_MODEL","HCAI_HELP_MODEL","HCAI_INTENT_MODEL","HCAI_VISION_MODEL"];
+import { REQUIRED_KEYS as REQUIRED, OPTIONAL_KEYS as OPTIONAL, diff } from "./railway-env-contract.mjs";
 
-function redactedForLog(value) {
-  const s = String(value);
-  if (s.length === 0) return "<empty>";
-  if (s.length <= 8) return `${s.length} chars: ${"*".repeat(s.length)}`;
-  return `${s.length} chars: ${s.slice(0, 3)}…${"*".repeat(Math.max(0, s.length - 7))}`;
-}
-
-function diff(current, desired) {
-  const known = new Set([...REQUIRED, ...OPTIONAL]);
-
-  const out = { missing: [], mismatch: [], unexpected: [], extra: [], wouldSet: [] };
-  const seen = new Set();
-
-  const allKeys = new Set([...REQUIRED, ...OPTIONAL, ...Object.keys(current), ...Object.keys(desired)]);
-
-  for (const key of allKeys) {
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const have = current[key];
-    const want = desired[key];
-    const wantIsEmpty = want === undefined || want === null || want === "";
-    const haveIsEmpty = have === undefined || have === null || have === "";
-
-    if (wantIsEmpty) {
-      if (REQUIRED.includes(key) && !haveIsEmpty) out.extra.push(key);
-      else if (REQUIRED.includes(key) && haveIsEmpty) out.missing.push(key);
-      else if (!haveIsEmpty) out.extra.push(key);
-      continue;
-    }
-    if (haveIsEmpty) {
-      if (REQUIRED.includes(key)) out.missing.push(key);
-      else out.wouldSet.push(key);
-      continue;
-    }
-    if (String(have) !== String(want)) out.mismatch.push({ key, have: redactedForLog(have), want: redactedForLog(want) });
-  }
-
-  for (const key of Object.keys(desired)) {
-    if (!known.has(key)) out.unexpected.push(key);
-  }
-  return out;
-}
+const REQUIRED_LIST = ["OPENCODE_API_KEY", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"];
+const BASE_VARS = {
+  OPENCODE_API_KEY: "x",
+  SLACK_BOT_TOKEN: "x",
+  SLACK_APP_TOKEN: "x",
+  SLACK_FAQ_CHANNELS: "x",
+};
 
 let pass = 0, fail = 0;
 function eq(name, got, want) {
@@ -57,54 +20,63 @@ function eq(name, got, want) {
   else { fail++; console.error("  FAIL", name, "\n    got:", got, "\n    want:", want); }
 }
 
+eq("migration required vars match validate()", REQUIRED, REQUIRED_LIST);
+
+eq("help channel and HCAI key are optional", [
+  OPTIONAL.includes("SLACK_HELP_CHANNEL"),
+  REQUIRED.includes("HCAI_API_KEY"),
+  OPTIONAL.includes("HCAI_API_KEY"),
+], [true, false, true]);
+
 eq("identical is empty",
-  diff(
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x" },
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x" },
-  ),
+  diff({ ...BASE_VARS }, { ...BASE_VARS }),
   { missing: [], mismatch: [], unexpected: [], extra: [], wouldSet: [] });
 
 eq("required key missing in FILE is reported",
-  diff(
-    { SLACK_BOT_TOKEN: "x" },
-    { SLACK_BOT_TOKEN: "x" },
-  ).missing,
-  ["SLACK_APP_TOKEN","SLACK_HELP_CHANNEL","SLACK_FAQ_CHANNELS","HCAI_API_KEY"]);
+  diff({ SLACK_BOT_TOKEN: "x" }, { SLACK_BOT_TOKEN: "x" }).missing,
+  ["OPENCODE_API_KEY", "SLACK_APP_TOKEN", "SLACK_FAQ_CHANNELS"]);
 
 eq("mismatch detected",
   diff(
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "OLD" },
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "NEW" },
+    { ...BASE_VARS, HCAI_API_KEY: "OLD" },
+    { ...BASE_VARS, HCAI_API_KEY: "NEW" },
   ).mismatch.map((m) => m.key),
   ["HCAI_API_KEY"]);
 
 eq("new optional becomes wouldSet",
   diff(
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x" },
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x", RIVET_DB_PATH: "/data/rivet.db" },
+    { ...BASE_VARS, HCAI_API_KEY: "x" },
+    { ...BASE_VARS, HCAI_API_KEY: "x", RIVET_DB_PATH: "/data/rivet.db" },
   ).wouldSet,
   ["RIVET_DB_PATH"]);
 
 eq("set on current but blank in file -> extra",
   diff(
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x", RIVET_FEEDBACK_REACTIONS: "yesyes" },
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x" },
+    { ...BASE_VARS, HCAI_API_KEY: "x", RIVET_FEEDBACK_REACTIONS: "yesyes" },
+    { ...BASE_VARS, HCAI_API_KEY: "x" },
   ).extra,
   ["RIVET_FEEDBACK_REACTIONS"]);
 
 eq("typo flagged as unexpected",
   diff(
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x" },
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x", RIVET_BUG: "typo" },
+    { ...BASE_VARS },
+    { ...BASE_VARS, RIVET_BUG: "typo" },
   ).unexpected,
   ["RIVET_BUG"]);
 
-eq("a second HCAI key is rejected",
+eq("a numbered HCAI key is accepted by the migration contract",
   diff(
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x" },
-    { SLACK_BOT_TOKEN: "x", SLACK_APP_TOKEN: "x", SLACK_HELP_CHANNEL: "x", SLACK_FAQ_CHANNELS: "x", HCAI_API_KEY: "x", HCAI_API_KEY_2: "y" },
+    { ...BASE_VARS, HCAI_API_KEY: "x" },
+    { ...BASE_VARS, HCAI_API_KEY: "x", HCAI_API_KEY_2: "y" },
   ).unexpected,
-  ["HCAI_API_KEY_2"]);
+  []);
+
+eq("a numbered OpenCode key is accepted by the migration contract",
+  diff(
+    { ...BASE_VARS, OPENCODE_API_KEY_2: "x" },
+    { ...BASE_VARS, OPENCODE_API_KEY_2: "x" },
+  ).unexpected,
+  []);
 
 console.log("\n" + (fail === 0 ? "all pass" : `${fail} fail`));
 process.exit(fail > 0 ? 1 : 0);

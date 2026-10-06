@@ -30,8 +30,8 @@ const COMPLETE_ENV = {
   OPENCODE_API_KEY: "sk-" + SECRET,
   SLACK_BOT_TOKEN: "xoxb-" + SECRET,
   SLACK_APP_TOKEN: "xapp-" + SECRET,
-  SLACK_HELP_CHANNEL: "C0000000000",
-  SLACK_FAQ_CHANNELS: "C1111111111",
+  SLACK_HELP_CHANNEL: "C0HELP0001",
+  SLACK_FAQ_CHANNELS: "C0HELP0001",
   RIVET_DASHBOARD_PASSCODE: "correct-horse-" + SECRET,
   SLACK_CLIENT_ID: "1234567890.9876543210",
 };
@@ -145,6 +145,30 @@ test("a missing required variable fails and is named, never valued", () => {
   assert.equal(check.status, "fail");
   assert.ok(check.detail.includes("SLACK_FAQ_CHANNELS"), check.detail);
   assert.ok(!check.detail.includes("SLACK_BOT_TOKEN"), "should not list vars that are present");
+});
+
+test("doctor identifies the Pixl HTTP signing secret in Rivet's Socket Mode token field", () => {
+  const r = report({ env: { ...COMPLETE_ENV, SLACK_APP_TOKEN: "signing-secret" } });
+  const check = r.checks.find((c) => c.name === "Slack token formats");
+  assert.ok(check, "report should validate Socket Mode token formats");
+  assert.equal(check.status, "fail");
+  assert.match(check.detail, /SLACK_APP_TOKEN.*xapp-/);
+  assert.doesNotMatch(check.detail, /signing-secret/);
+});
+
+test("doctor warns when FAQ channels are not claimed by a configured program", () => {
+  const r = report({
+    env: {
+      ...COMPLETE_ENV,
+      RIVET_PROGRAMS_JSON: JSON.stringify([{ id: "loadout", channels: ["C0LOADOUT"], sources: [] }]),
+    },
+    files: [],
+  });
+  const check = r.checks.find((c) => c.name === "FAQ channel ownership");
+  assert.ok(check, "report should verify that FAQ channels resolve to configured programs");
+  assert.equal(check.status, "warn");
+  assert.match(check.detail, /C0HELP0001/);
+  assert.match(check.detail, /shared/);
 });
 
 test("every required variable is reported when the env is empty", () => {

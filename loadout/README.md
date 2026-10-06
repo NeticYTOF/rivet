@@ -35,13 +35,17 @@ over the file.
 Always confirm with `bun index.ts --doctor` — it fails loudly when the program config is the
 wrong shape or a `file://` source no longer resolves.
 
-Then claim the LOADOUT channels so events resolve to the program:
+The bundled `channels` entry is `C0C5XUDMRH9`. Make sure that is the real
+LOADOUT channel ID in your workspace and that `SLACK_FAQ_CHANNELS` includes it.
+If your channel has a different ID, update both values in the program and env.
+For additional program channels, use:
 
 ```
 /rivet-program channels add C0000000000,C1111111111
 ```
 
-`program.json` ships with `"scope": "program"` and no channels, so it stays inert until channels are claimed — adding the config cannot make Rivet answer in unrelated channels.
+`program.json` ships with `"scope": "program"`; Rivet ignores channels the
+program has not claimed.
 
 ## Ground rules the bot enforces
 

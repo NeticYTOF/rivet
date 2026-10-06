@@ -19,11 +19,15 @@ One shared Rivet Core serves many programs. One Slack app, one `@Rivet`.
 ## Environment (Core)
 
 Required: `SLACK_BOT_TOKEN` (`xoxb-`), `SLACK_APP_TOKEN` (`xapp-`,
-`connections:write`), `SLACK_HELP_CHANNEL`, `SLACK_FAQ_CHANNELS`,
-`OPENCODE_API_KEY` (model pool; add `_2`, `_3`… for rotation).
+`connections:write`), `SLACK_FAQ_CHANNELS`, and `OPENCODE_API_KEY` (default
+intent/fallback key; add `_2`, `_3`… for rotation). `SLACK_HELP_CHANNEL` is
+optional for a dedicated channel that replies to every top-level post.
 
 Model cascade is automatic: HCAI → 9Router → OpenRouter → Zen standby, with
-per-key cooldowns. Ticketing works with every provider down.
+per-key cooldowns. HCAI task-specific models are controlled by `HCAI_MODEL`,
+`HCAI_PING_MODEL`, `HCAI_HELP_MODEL`, `HCAI_INTENT_MODEL`, and
+`HCAI_VISION_MODEL`; legacy intent defaults to `gpt-4.1-nano`. Ticketing works
+with every provider down.
 
 Hosted extras: `RIVET_WORKSPACE_ID` (Slack team id for tenant boundaries),
 `RIVET_INTERNAL_TOKEN` (long random; enables `/internal/v1/*` for Wizard —
@@ -38,7 +42,7 @@ re-authorization after adding it, branding falls back to plain Rivet),
 `channels:history`, `groups:history`, `channels:join`, `app_mentions:read`,
 `reactions:read`, `reactions:write`, `commands`, `im:history`, `im:write`,
 `channels:read`, `groups:read`, `files:read`. Socket Mode on, Interactivity
-on. Generate the manifest with `bun run manifest` — command names derive from
+on, and `app_mention` subscribed. Generate the manifest with `bun run manifest` — command names derive from
 `RIVET_BOT_SLUG`; command names use that configured slug, including the sources
 and administration commands.
 

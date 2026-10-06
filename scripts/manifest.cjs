@@ -1,14 +1,14 @@
 // Prints the Slack app manifest for THIS deployment, so the app you create in
 // Slack advertises exactly the commands the bot listens for.
 //
-//   bun run scripts/manifest.js
-//   RIVET_BOT_NAME="Sol" RIVET_BOT_SLUG=sol bun run scripts/manifest.js
+//   bun run manifest
+//   RIVET_BOT_NAME="Rivet" RIVET_BOT_SLUG=rivet bun run manifest
 //
 // Paste the output into api.slack.com/apps → Create New App → From a manifest.
 //
 // Why generate it rather than write it out once: command names come from
 // RIVET_BOT_SLUG (see lib/brand.js). Hand-editing a manifest is how you end up
-// with an app advertising /sol-teach while the process listens for /rivet-teach —
+// with an app advertising /pixl-teach while the process listens for /rivet-teach —
 // a failure with no error anywhere, the command just silently does nothing.
 const brand = require("../lib/brand");
 

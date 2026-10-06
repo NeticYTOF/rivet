@@ -1039,6 +1039,50 @@ test("onAppMention routes to respond ALWAYS addressed (mention path parity)", as
   assert.equal(calls[0].addressed, true);
 });
 
+test("a direct ping in a message event uses the mention route and dedupes app_mention delivery", async () => {
+  const programs = require("./programs");
+  const savedRespond = respond.respond;
+  const savedHelp = config.slack.helpChannel;
+  const savedFaq = config.slack.faqChannels;
+  const savedAuto = config.slack.autoReplyChannel;
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const calls: any[] = [];
+  const event = {
+    ts: "993.2",
+    channel: "C-CHARMEN-MAIN",
+    user: "U0ASKER",
+    text: "<@U0RIVET> how do i submit",
+  };
+  const client = {};
+
+  config.slack.helpChannel = null;
+  config.slack.faqChannels = [event.channel];
+  config.slack.autoReplyChannel = event.channel;
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([{ id: "charmen", name: "CharMen", channels: [event.channel] }]);
+  programs.invalidate();
+  respond.respond = async (args: any) => void calls.push(args);
+
+  try {
+    await handlers.onMessage({ event, client });
+    assert.equal(calls.length, 1, "the message event should handle a direct ping on its own");
+
+    await handlers.onAppMention({ event, client });
+    assert.equal(calls.length, 1, "the parallel app_mention delivery must not answer twice");
+  } finally {
+    respond.respond = savedRespond;
+    config.slack.helpChannel = savedHelp;
+    config.slack.faqChannels = savedFaq;
+    config.slack.autoReplyChannel = savedAuto;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    programs.invalidate();
+  }
+
+  assert.equal(calls[0].mode, respond.ALWAYS);
+  assert.equal(calls[0].addressed, true);
+  assert.equal(calls[0].question, "how do i submit");
+});
+
 test("!sum and !teach from a helper still run in a taken-over help thread", async () => {
   const savedTeach = learn.teach;
   const savedSum = sumThread.summarizeThreadForHelper;
