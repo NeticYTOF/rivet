@@ -311,7 +311,11 @@ async function classifyIntent(
         fallback: config.intent.fallback,
         onRateLimited: (config.intent as typeof config.intent & { onRateLimited?: unknown }).onRateLimited,
         maxTokens: MAX_TOKENS,
-        temperature: 0.3,
+        // Deterministic. Classification is a judgement call with exactly one
+        // right answer per message; sampling at 0.3 turned borderline phrasing
+        // ("who is the lead org of loadout") into intermittent OFF_TOPIC
+        // verdicts that silenced real questions with no error and no retry.
+        temperature: 0,
         thinking: { type: "disabled" },
         reasoningEffort: REASONING_EFFORT,
         timeout: TIMEOUT_MS,
