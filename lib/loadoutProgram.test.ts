@@ -49,14 +49,11 @@ test("the LOADOUT program claims explicit Slack channels", () => {
   for (const channel of program.channels ?? []) expect(channel).toMatch(/^C[A-Z0-9]+$/);
 });
 
-test("Loadout runs #loadout as its help channel", () => {
-  // #loadout files tickets, escalates to helpers, and always answers. The
-  // legacy dual-role guard was deliberately lifted for this deployment: a
-  // help channel already replies to every top-level message, so naming it
-  // main as well changes nothing (see lib/programModel.ts).
+test("Loadout splits ambient and help channels: #loadout is main, #loadout-help files tickets", () => {
   const program = loadout();
-  expect(program.helpChannel).toBe("C0C5XUDMRH9");
-  expect(program.channels ?? []).toContain("C0C5XUDMRH9");
+  expect(program.channels ?? []).toEqual(["C0C5XUDMRH9"]);
+  expect(program.helpChannel).toBe("C0C6XBLM0M7");
+  expect(program.channels ?? []).not.toContain(program.helpChannel);
 });
 
 test("LOADOUT pins the canonical economy rules that the corpus is graded on", () => {
