@@ -629,6 +629,15 @@ async function respond({
 
   context.addToThread(threadTs, "user", trimmed, userId, channel);
 
+  // classify() is handed this thread as CONTEXT. The message under judgement
+  // was just added to the thread above, so the classifier saw its own question
+  // sitting in the transcript, read it as a human asking another human, and
+  // returned directedAtHuman - silencing questions it had already classified
+  // as HELP_NEEDED. Drop the trailing duplicate; the message is passed
+  // separately as the thing to judge.
+  const threadMessages = context.getThreadMessages(threadTs);
+  if (threadMessages.length && threadMessages[threadMessages.length - 1].text === trimmed) threadMessages.pop();
+
   const silencedBefore = isAddressed ? reply.silenceState(threadTs) : null;
 
   if (await handleMute({ client, channel, threadTs, question: trimmed, program: prog, workspaceId })) return true;
@@ -661,7 +670,7 @@ async function respond({
     addressed: isAddressed,
     userId,
     channel,
-    threadMessages: context.getThreadMessages(threadTs),
+    threadMessages,
     recentMessages: await recentChannelContext({ seedClient, channel, messageTs, threadTs }),
   });
   trace.set({

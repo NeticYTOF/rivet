@@ -74,9 +74,14 @@ async function fromLegacyIntent({
     .classifyIntentContext(message, program, { userId, channel, addressed, threadMessages, recentMessages })
     .catch(() => null);
   if (!result) return { engage: false, intent: null, error: "unavailable", source: "intent" };
+  // The verdict decides whether this is a program question. directedAtHuman is
+  // a secondary signal and must not override it: a message can be a real
+  // question aimed at a human *and* something Rivet can answer. Checking it
+  // first silenced every such message, and the resulting log line reported
+  // intent "human_conversation" - which reads as a classifier failure when the
+  // classifier had in fact returned HELP_NEEDED.
+  if (result.verdict === intent.HELP_NEEDED) return { engage: true, intent: "support_question", error: null, source: "intent" };
   if (result.directedAtHuman) return { engage: false, intent: "human_conversation", error: null, source: "intent" };
-  if (result.verdict === intent.HELP_NEEDED)
-    return { engage: true, intent: "support_question", error: null, source: "intent" };
   if (result.verdict === intent.OFF_TOPIC)
     return { engage: false, intent: "unrelated_chatter", error: null, source: "intent" };
   return {
