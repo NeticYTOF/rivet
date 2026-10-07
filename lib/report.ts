@@ -445,12 +445,36 @@ async function postWeekly(client: SlackClient, programId: string | null = null):
   return true;
 }
 
+async function postDailyCosts(client: SlackClient): Promise<boolean> {
+  const costReport = require("./costReport");
+  if (!costReport.isCostReportDue()) return false;
+  const channel = reportChannel(null);
+  if (!channel) return false;
+  let rows: Array<Record<string, unknown>> = [];
+  try {
+    rows = db.llmUsageSummary(costReport.DAY_MS);
+  } catch (e: unknown) {
+    log.debug("report", `cost digest read failed: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+  const text = costReport.costDigestText(rows);
+  // No calls in 24h is not worth a message.
+  if (!text) return false;
+  await client.chat.postMessage({ channel, text });
+  costReport.markCostReportSent(new Date().toISOString().slice(0, 10));
+  log.info("report", `daily cost digest posted to ${channel}`);
+  return true;
+}
+
 async function tick(client: SlackClient): Promise<boolean> {
   await classifyGaps().catch((e: unknown) =>
     log.debug("report", `classify pass failed: ${e instanceof Error ? e.message : String(e)}`),
   );
   await draftGaps(client).catch((e: unknown) =>
     log.debug("report", `draft pass failed: ${e instanceof Error ? e.message : String(e)}`),
+  );
+  await postDailyCosts(client).catch((e: unknown) =>
+    log.debug("report", `cost digest failed: ${e instanceof Error ? e.message : String(e)}`),
   );
   if (!isReportDue()) return false;
   return postWeekly(client);

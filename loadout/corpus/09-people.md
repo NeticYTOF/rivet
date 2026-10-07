@@ -2,7 +2,7 @@
 
 - **Jerry — Lead organizer.** Leads Loadout and develops its website.
 - **Fazin / Wind — Developer and co-organizer.** Works on the program plan and helps develop Loadout.
-- **Netic (Notios) — Developer and co-organizer.** Develops Rivet, Loadout's Slack bot, and helps organize the program.
+- **Netic — Developer and co-organizer.** Develops Rivet, Loadout's Slack bot, and helps organize the program.
 
 Jerry is the lead org of Loadout.
 

@@ -117,8 +117,15 @@ function usageFor(data: unknown): Usage {
 const KNOWN_PRICING = Object.freeze({
   "gpt-4o-mini": { input: 0.15, output: 0.6 },
   "gpt-4o": { input: 2.5, output: 10 },
+  "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "openai/gpt-4o": { input: 2.5, output: 10 },
+  "openai/gpt-4.1-nano": { input: 0.1, output: 0.4 },
+  "openai/gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "deepseek/deepseek-v4-flash-0731": { input: 0.0152, output: 1.28 },
+  "deepseek/deepseek-v4.1-flash": { input: 0.3, output: 1.2 },
+  // Units are USD per million tokens, verified against
+  // https://ai.hackclub.com/proxy/v1/models on 2026-10-07.
 });
-
 function costFor(model: string, usage: Usage) {
   let prices: Record<string, Price> = { ...KNOWN_PRICING };
   try {
