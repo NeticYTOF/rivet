@@ -28,6 +28,7 @@ const intent = require("../intent");
 const lookup = require("../lookup");
 const tickets = require("../tickets");
 const context = require("../context");
+const link = require("../link");
 const respond = require("../respond");
 
 type TestRecord = Record<string, unknown>;
@@ -407,6 +408,39 @@ test("the classifier never receives documentation", async () => {
 test("addressed: program question gets the grounded answer", async () => {
   expect(await send({ channel: "C_ACME_MAIN", text: "what is restoration energy?", addressed: true })).toBe(true);
   expect(postedText()).toContain("Restoration Energy");
+});
+
+test("addressed URL fetch starts before classification finishes", async () => {
+  let releaseClassifier: (() => void) | null = null;
+  const classifierGate = new Promise<void>((resolve) => {
+    releaseClassifier = resolve;
+  });
+  let linkStarted = false;
+
+  stub(jevDecision, "evaluateSupportDecision", async (args: DecisionArgs) => {
+    jevCalls.push(args);
+    await classifierGate;
+    return { action: "engage", intent: "addressed_general_request" };
+  });
+  stub(link, "fetchUrlContent", async () => {
+    linkStarted = true;
+    releaseClassifier?.();
+    return { url: "https://example.com", text: "example page content" };
+  });
+  stub(lookup, "answerOrChat", async (_question: string, ctx: string) => {
+    expect(linkStarted).toBe(true);
+    expect(ctx).toContain("example page content");
+    return { answer: "I read the linked page.", source: "NONE" };
+  });
+
+  expect(
+    await send({
+      channel: "C_ACME_MAIN",
+      text: "check this https://example.com",
+      addressed: true,
+    }),
+  ).toBe(true);
+  expect(linkStarted).toBe(true);
 });
 
 test("addressed: a cookie recipe gets a general-purpose answer", async () => {
