@@ -193,6 +193,39 @@ test("refreshSource invalidates cached source sections", async () => {
   }
 });
 
+test("program invalidation drops cached source-section views", async () => {
+  const saved = process.env.RIVET_PROGRAMS_JSON;
+  const sourceA = { name: "Docs A", type: "text", content: "alpha-source token" };
+  const sourceB = { name: "Docs B", type: "text", content: "beta-source token" };
+
+  await knowledge.refreshSource(sourceA, true);
+  await knowledge.refreshSource(sourceB, true);
+
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "versioned", name: "Versioned", sources: [sourceA] },
+  ]);
+  programs.invalidate();
+  knowledge.invalidate();
+
+  try {
+    assert.match(knowledge.getContext("alpha source", "versioned"), /alpha-source token/);
+
+    process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+      { id: "versioned", name: "Versioned", sources: [sourceB] },
+    ]);
+    programs.invalidate();
+
+    const refreshed = knowledge.getContext("beta source", "versioned");
+    assert.match(refreshed, /beta-source token/);
+    assert.doesNotMatch(refreshed, /alpha-source token/);
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = saved;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
+});
+
 test("draft knowledge uses only supplied source text", () => {
   const result = knowledge.registerDraftKnowledge(
     { id: "draft-demo", status: "suspended", privateSandboxOnly: true },
