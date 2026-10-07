@@ -20,7 +20,7 @@ External traction is rewarded through the **Signal Bonus**: projects that pick u
 
 Depth in a track gives better pricing on that field. Most rewards stay available across tracks, but cross-track buying can cost more — an SSD is Systems and Compute, a Raspberry Pi is Hardware and Systems. Permanent field discounts stay **modest** and are capped per item, so a deep specialist is meaningfully cheaper on their own field without runaway discounts on expensive gear.
 
-## Requisitions
+## How Requisitions save
 
 Requisitions are rare, one-use progression items that let a specialist push beyond the normal expensive-item savings cap. They are earned at fixed level milestones:
 
@@ -32,7 +32,7 @@ LV.12  -> Requisition II
 LV.15  -> Master Requisition
 ```
 
-A Requisition is one-use, non-transferable, never expires, does not stack on another Requisition on the same purchase, and has a minimum eligible item price. **A Requisition never bypasses a Custom Order level gate.**
+A matching Field Requisition raises the savings cap for one eligible order, letting more of the discount you earned count; you still pay the remaining price in Bolts. Example: your Compute level earns a discount on a GPU, and a Compute Requisition lets more of that discount apply. Requisition II and Master have higher savings limits than Requisition I. Use at most one on an order, and the item must meet its minimum value. Savings caps and minimum item values have not been set for launch. **A Requisition never bypasses a Custom Order level gate, and it cannot remove a level requirement for specialist prizes.**
 
 ## AI rules
 

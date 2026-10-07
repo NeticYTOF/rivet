@@ -4,7 +4,7 @@ Bolts buy equipment. What you buy is the Physical Loadout, and it exists so you 
 
 ## What is in the shop
 
-Planned categories include hosting and domains, AI and GPU compute, Raspberry Pi and FPGA boards, developer hardware, RAM and SSDs, PC upgrades, GPUs, 3D printers, fabrication equipment, and travel grants.
+Planned prizes may include developer hardware, embedded boards, compute, tools, storage, fabrication, domains, and custom equipment. None are currently available to order.
 
 The intended mix is roughly **70% Open**, **20% Specialist**, and **10% Mastery** — a target mix rather than a hard law. Most rewards are multi-track: an SSD serves Systems and Compute, a Raspberry Pi serves Hardware and Systems. Hard track locks are reserved for a small set of genuine Mastery equipment.
 
@@ -16,7 +16,7 @@ A good Loadout shop contains stuff people actually want. If you want something a
 
 ## Custom Orders
 
-After enough real building, participants can request technical equipment that is **not in the normal shop** — a GPU, a laptop, a mini server, an unusual dev board, a Steam Deck, an FPGA, or whatever makes sense for the build you are doing next.
+Request specific technical equipment outside the regular shop. Describe what you need and how it would help your project. The team checks project fit, your related track level and Bolt balance, the budget, and your region. If approved, you receive a quote naming the item and Bolt price, and you decide whether to accept; an eligible quote may allow one matching Field Requisition. Requests are not open yet — the team must approve fulfillment before an order goes ahead.
 
 Custom Orders require all four of: enough global **Bolts**, the relevant **Track Level** or Custom Order tier, program fit, and fulfillment approval. Unlocking Custom Orders does not make anything free; it means the catalogue stops being the limit on what you can ask for.
 

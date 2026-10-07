@@ -13,7 +13,7 @@ function botName() {
 
 function makerLine(programName: string) {
   if (programName === "Loadout") {
-    return "A: Loadout was built by Netic, Wind, and Jerry, who are also the org behind it.";
+    return "A: Rivet was built by Netic. Loadout itself is led by Jerry, with Fazin / Wind and Netic (Notios) as co-organizers.";
   }
   return `A: This bot is configured to help with ${programName}.`;
 }
