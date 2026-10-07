@@ -621,7 +621,8 @@ async function respond({
     return false;
   }
 
-  if (seedClient && threadTs) {
+  const isSlackRootMessage = Boolean(messageTs && messageTs === threadTs);
+  if (seedClient && threadTs && !isSlackRootMessage) {
     await context.seedFromSlack(seedClient, channel, threadTs, config.slack.botUserId, messageTs || threadTs);
   }
 
