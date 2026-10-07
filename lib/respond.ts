@@ -896,6 +896,7 @@ async function respond({
       placeholderTimer = null;
     }
     log.error("respond", "answer lookup failed:", errorMessage(error));
+    trace.set({ answerMs: Date.now() - answerStartedAt });
     try {
       await streamer?.settle();
     } catch (settleError: unknown) {
