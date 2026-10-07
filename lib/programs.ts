@@ -81,6 +81,7 @@ const DEFAULT_WORKSPACE = "default";
 const SHARED_PROGRAM_ID = "shared";
 
 let cachedPrograms: ProgramRecord[] | null = null;
+let cacheVersion = 0;
 
 let cachedEnvRaw: string | null = null;
 let cachedEnvPrograms: ProgramRecord[] | null = null;
@@ -278,6 +279,11 @@ function invalidate() {
   cachedPrograms = null;
   cachedEnvRaw = null;
   cachedEnvPrograms = null;
+  cacheVersion += 1;
+}
+
+function version() {
+  return cacheVersion;
 }
 
 function emptyShared(): ProgramRecord {
@@ -553,4 +559,5 @@ export = {
   removeChannelFromProgram,
   setChannelTicketDestination,
   invalidate,
+  version,
 };
