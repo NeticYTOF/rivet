@@ -404,11 +404,16 @@ async function streamCompletion(
   onDelta: (delta: string, text: string) => boolean | void,
 ) {
   const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => controller.abort(), timeout || DEFAULT_TIMEOUT_MS);
-  const clearFirstTokenTimer = () => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const resetIdleTimer = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), timeout || DEFAULT_TIMEOUT_MS);
+  };
+  const clearIdleTimer = () => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
+  resetIdleTimer();
 
   const usedKey = typeof apiKey === "function" ? apiKey() : apiKey;
   const filteredThinking = thinkingFor(model, thinking);
@@ -452,7 +457,7 @@ async function streamCompletion(
     const applyFrames = (frames: { finishReason: string | null; deltas: string[] }) => {
       if (frames.finishReason) finishReason = frames.finishReason;
       for (const delta of frames.deltas) {
-        clearFirstTokenTimer();
+        resetIdleTimer();
 
         const hasThinkOpen = (s: string) => /<(?:think|thinking|thought|scratchpad)>/i.test(s);
         const hasThinkClose = (s: string) => /<\/(?:think|thinking|thought|scratchpad)>/i.test(s);
@@ -502,7 +507,7 @@ async function streamCompletion(
 
     return { text, stopped, usedKey, finishReason };
   } finally {
-    clearFirstTokenTimer();
+    clearIdleTimer();
   }
 }
 
