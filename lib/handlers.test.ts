@@ -793,22 +793,36 @@ test("a plain message naming Rivet in an unclaimed channel gets total silence", 
 test("an @-mention in an unclaimed channel reaches the safety path, never silence", async () => {
   const savedRespond = respond.respond;
   const posted: any[] = [];
-  respond.respond = async (args: any) => void posted.push(args);
+  let normalModelCalls = 0;
+  respond.respond = async (args: any) => {
+    normalModelCalls += 1;
+    posted.push(args);
+  };
   try {
-    await handlers.onAppMention({
-      event: {
-        ts: "991.1",
-        channel: "C0RANDOM-UNCLAIMED-2",
-        user: "U0ASKER",
-        text: "<@U0RIVET> is anyone else having thoughts of self harm",
-      },
-      client: {
-        chat: {
-          postMessage: async (args: any) => void posted.push(args),
-          postEphemeral: async (args: any) => void posted.push(args),
+    for (const [index, phrase] of [
+      "thoughts of self harm",
+      "want to hurt myself",
+      "don't want to be alive",
+      "end my life",
+    ].entries()) {
+      const ts = `991.${index + 1}`;
+      await handlers.onAppMention({
+        event: {
+          ts,
+          channel: "C0RANDOM-UNCLAIMED-2",
+          team: "T_UNCLAIMED",
+          user: "U0ASKER",
+          text: `<@U0RIVET> is anyone else feeling ${phrase}`,
         },
-      },
-    });
+        client: {
+          chat: {
+            postMessage: async (args: any) => void posted.push(args),
+            postEphemeral: async (args: any) => void posted.push(args),
+          },
+        },
+      });
+      assert.equal(db.getTicketByThreadTs(ts, "T_UNCLAIMED"), null, "no ticket was filed for the unclaimed workspace");
+    }
   } finally {
     respond.respond = savedRespond;
   }
@@ -816,7 +830,7 @@ test("an @-mention in an unclaimed channel reaches the safety path, never silenc
   // (escalation, never an answer) must fire; total silence on a self-harm
   // mention is the one outcome that is never acceptable.
   assert.ok(posted.length > 0, "the safety path fired for an @-mention");
-  assert.equal(db.getTicketByThreadTs("991.1", undefined), null, "no ticket was filed for the unclaimed channel");
+  assert.equal(normalModelCalls, 0, "crisis mentions must not reach the general answer model");
 });
 
 test("a DM still works — the scope gate is channel-only, not global", async () => {
@@ -1040,6 +1054,91 @@ test("onAppMention routes to respond ALWAYS addressed (mention path parity)", as
   assert.equal(calls.length, 1);
   assert.equal(calls[0].mode, respond.ALWAYS);
   assert.equal(calls[0].addressed, true);
+  assert.equal(calls[0].program?.id, "charmen");
+});
+
+test("an unclaimed direct mention keeps the safely resolved Loadout program context", async () => {
+  const savedRespond = respond.respond;
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const configured = {
+    id: "loadout",
+    name: "Loadout",
+    workspaceId: "T_LOADOUT",
+    requireGroundedAnswer: true,
+    posture: "active",
+  };
+  const calls: any[] = [];
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([configured]);
+  require("./programs").invalidate();
+  respond.respond = async (args: any) => void calls.push(args);
+  try {
+    await handlers.onAppMention({
+      event: { ts: "993.3", channel: "C-UNCLAIMED", team: "T_LOADOUT", user: "U0ASKER", text: "<@U0RIVET> help" },
+      client: {},
+    });
+  } finally {
+    respond.respond = savedRespond;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    require("./programs").invalidate();
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].program?.id, "loadout");
+  assert.equal(calls[0].program?.requireGroundedAnswer, true);
+  assert.equal(calls[0].programSettings?.enabled, true);
+});
+
+test("an unclaimed mention cannot borrow a Loadout config owned by another workspace", async () => {
+  const savedRespond = respond.respond;
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const calls: any[] = [];
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "loadout", workspaceId: "T_OWNER", requireGroundedAnswer: true },
+  ]);
+  require("./programs").invalidate();
+  respond.respond = async (args: any) => void calls.push(args);
+  try {
+    await handlers.onAppMention({
+      event: { ts: "993.4", channel: "C-OTHER-SPACE", team: "T_OTHER", user: "U0ASKER", text: "<@U0RIVET> help" },
+      client: {},
+    });
+  } finally {
+    respond.respond = savedRespond;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    require("./programs").invalidate();
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].program?.id, "shared");
+  assert.notEqual(calls[0].program?.requireGroundedAnswer, true);
+});
+
+test("an unclaimed mention without workspace identity cannot borrow a workspace-owned Loadout config", async () => {
+  const savedRespond = respond.respond;
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const savedWorkspace = process.env.RIVET_WORKSPACE_ID;
+  const calls: any[] = [];
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "loadout", workspaceId: "T_OWNER", requireGroundedAnswer: true },
+  ]);
+  process.env.RIVET_WORKSPACE_ID = "T_OWNER";
+  require("./programs").invalidate();
+  respond.respond = async (args: any) => void calls.push(args);
+  try {
+    await handlers.onAppMention({
+      event: { ts: "993.5", channel: "C-NO-WORKSPACE", user: "U0ASKER", text: "<@U0RIVET> help" },
+      client: {},
+    });
+  } finally {
+    respond.respond = savedRespond;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    if (savedWorkspace === undefined) delete process.env.RIVET_WORKSPACE_ID;
+    else process.env.RIVET_WORKSPACE_ID = savedWorkspace;
+    require("./programs").invalidate();
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].program?.id, "shared");
 });
 
 test("a direct ping in a message event uses the mention route and dedupes app_mention delivery", async () => {

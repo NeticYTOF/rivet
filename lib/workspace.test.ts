@@ -10,6 +10,19 @@ test("workspaceOf prefers event team, then body, then configured", () => {
   assert.equal(workspace.workspaceOf(), workspace.configuredWorkspaceId());
 });
 
+test("explicitWorkspaceOf never treats the configured fallback as event identity", () => {
+  const saved = process.env.RIVET_WORKSPACE_ID;
+  try {
+    process.env.RIVET_WORKSPACE_ID = "T_CONFIGURED";
+    assert.equal(workspace.explicitWorkspaceOf({}), null);
+    assert.equal(workspace.explicitWorkspaceOf({}, { team_id: "T_ENVELOPE" }), "T_ENVELOPE");
+    assert.equal(workspace.explicitWorkspaceOf({ team: "T_EVENT" }), "T_EVENT");
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_WORKSPACE_ID;
+    else process.env.RIVET_WORKSPACE_ID = saved;
+  }
+});
+
 test("threadKey scopes by workspace with a stable default", () => {
   assert.equal(workspace.threadKey("T1", "1.2"), "T1:1.2");
   assert.equal(workspace.threadKey(null, "1.2"), "default:1.2");

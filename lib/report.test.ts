@@ -437,6 +437,47 @@ test("a report is due once per week and not twice after a restart", async () => 
   assert.equal(report.isReportDue(), true);
 });
 
+test("overlapping report ticks share one background pass", async () => {
+  db.handle().query("DELETE FROM metrics").run();
+  db.handle().query("DELETE FROM doc_gaps").run();
+  db.recordGap("how do i configure the sample device", "U-REPORT-OVERLAP", "C-REPORT-OVERLAP");
+  const original = llm.complete;
+  const originalSetTimeout = global.setTimeout;
+  let calls = 0;
+  let start: (() => void) | null = null;
+  let finish: ((value: { text: string }) => void) | null = null;
+  const started = new Promise<void>((resolve) => {
+    start = resolve;
+  });
+  const pending = new Promise<{ text: string }>((resolve) => {
+    finish = resolve;
+  });
+  llm.complete = async () => {
+    calls += 1;
+    start?.();
+    return pending;
+  };
+  global.setTimeout = ((callback: (...args: any[]) => void) => originalSetTimeout(callback, 0)) as typeof setTimeout;
+  let first: Promise<boolean> | null = null;
+  let second: Promise<boolean> | null = null;
+  let callsAtOverlap = 0;
+  try {
+    first = report.tick({});
+    await started;
+    second = report.tick({});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    callsAtOverlap = calls;
+    finish?.({ text: "DOCS" });
+    await Promise.all([first, second]);
+  } finally {
+    finish?.({ text: "DOCS" });
+    await Promise.allSettled([first, second].filter(Boolean) as Promise<boolean>[]);
+    llm.complete = original;
+    global.setTimeout = originalSetTimeout;
+  }
+  assert.equal(callsAtOverlap, 1, "one report tick owns the gap-classification request");
+});
+
 test("a post that throws leaves the report due", async () => {
   db.handle().query("DELETE FROM metrics").run();
   config.reportChannel = "C_REPORT";

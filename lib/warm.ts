@@ -3,6 +3,7 @@ const cache = require("./cache");
 const db = require("./db");
 const log = require("./log");
 const lookup = require("./lookup");
+const programs = require("./programs");
 
 const CYCLE_MS = 5 * 60 * 1000;
 const PER_CYCLE = 4;
@@ -14,11 +15,15 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function warmOne(question: string, { refreshed = false }: { refreshed?: boolean } = {}) {
-  const result = await lookup.answerOrChat(question, "");
+async function warmOne(
+  question: string,
+  { refreshed = false, programId = null }: { refreshed?: boolean; programId?: string | null } = {},
+) {
+  const program = programId ? programs.get(programId) : null;
+  const result = await lookup.answerOrChat(question, "", { program, skipCache: true });
   if (!result?.source) return false;
 
-  if (refreshed) cache.put(question, result, { refreshed: true });
+  if (refreshed) cache.put(question, result, { refreshed: true }, programId);
   return true;
 }
 
@@ -29,10 +34,30 @@ function faqQuestions(): string[] {
     .filter(Boolean);
 }
 
+function fairFaqEntries() {
+  const entries =
+    typeof knowledge.faqEntries === "function"
+      ? knowledge.faqEntries()
+      : knowledge.faqQuestions().map((question: string) => ({ question, programId: null }));
+  const groups = new Map<string, typeof entries>();
+  for (const entry of entries) {
+    const key = entry.programId || "shared";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  const queues = [...groups.values()];
+  const fair = [];
+  while (queues.some((queue) => queue.length)) {
+    for (const queue of queues) if (queue.length) fair.push(queue.shift());
+  }
+  return fair;
+}
+
 async function warmFaq({ limit = 2, spacingMs = 15000 }: { limit?: number; spacingMs?: number } = {}) {
-  const questions = faqQuestions()
-    .filter((q) => !cache.get(q))
+  const entries = fairFaqEntries()
+    .filter((entry) => !cache.get(entry.question, entry.programId))
     .slice(0, limit);
+  const questions = entries.map((entry) => entry.question);
   if (questions.length === 0) {
     log.debug("warm", "faq already warm");
     return 0;
@@ -40,13 +65,13 @@ async function warmFaq({ limit = 2, spacingMs = 15000 }: { limit?: number; spaci
 
   log.info("warm", `pre-warming ${questions.length} FAQ question(s)`);
   let warmed = 0;
-  for (const question of questions) {
+  for (const entry of entries) {
     try {
-      if (await warmOne(question)) warmed += 1;
+      if (await warmOne(entry.question, { programId: entry.programId })) warmed += 1;
     } catch (error: unknown) {
       log.debug(
         "warm",
-        `could not pre-warm "${question.slice(0, 40)}": ${error instanceof Error ? error.message : String(error)}`,
+        `could not pre-warm "${entry.question.slice(0, 40)}": ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     await sleep(spacingMs);
@@ -66,7 +91,7 @@ async function refreshStale({
   let refreshed = 0;
   for (const entry of stale) {
     try {
-      if (await warmOne(entry.question, { refreshed: true })) {
+      if (await warmOne(entry.question, { refreshed: true, programId: entry.program_id })) {
         refreshed += 1;
         log.debug("warm", `refreshed "${entry.question.slice(0, 40)}" (asked ${entry.ask_count}x)`);
       }
@@ -104,4 +129,4 @@ function stop() {
   timer = null;
 }
 
-export = { start, stop, warmFaq, refreshStale, warmOne, faqQuestions, CYCLE_MS, PER_CYCLE, SPACING_MS };
+export = { start, stop, warmFaq, refreshStale, warmOne, faqQuestions, fairFaqEntries, CYCLE_MS, PER_CYCLE, SPACING_MS };

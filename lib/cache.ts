@@ -29,7 +29,15 @@ function isVolatile(source: string | null | undefined) {
 }
 
 function normalize(question: string) {
-  const terms = retrieve.tokenize((question || "").replace(/<@[^>]+>/g, " "));
+  const text = (question || "").replace(/<@[^>]+>/g, " ").toLowerCase();
+  const terms = retrieve.tokenize(text);
+  // Retrieval deliberately removes numbers and negation for fuzzy matching;
+  // answer identity must retain them because they can reverse a grounded answer.
+  const identityTerms =
+    text.match(
+      /\b(?:\d+(?:\.\d+)?|not|no|never|cannot|cant|dont|doesnt|didnt|wont|isnt|arent|wasnt|werent|shouldnt|couldnt|wouldnt|hasnt|havent|without|except)\b/g,
+    ) || [];
+  terms.push(...identityTerms);
   return [...new Set(terms)].sort().join(" ");
 }
 
@@ -63,7 +71,7 @@ function put(
   }
   const key = keyFor(question, programId);
   if (!key) return;
-  putCachedAnswer(key, question, result, options || {});
+  putCachedAnswer(key, question, result, options || {}, programId);
 }
 
 function cacheRow(hash: string) {
@@ -95,23 +103,24 @@ function putCachedAnswer(
   question: string,
   result: CacheResult,
   { refreshed = false }: CacheOptions = {},
+  programId: string | null = null,
 ) {
   const t = db.now();
   db.handle()
     .query(
-      `INSERT INTO answer_cache (question_hash, question, source, answer, created_at, last_asked_at, refreshed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO answer_cache (question_hash, question, source, answer, created_at, last_asked_at, refreshed_at, program_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(question_hash) DO UPDATE SET
-         source = excluded.source, answer = excluded.answer, refreshed_at = excluded.refreshed_at`,
+         source = excluded.source, answer = excluded.answer, refreshed_at = excluded.refreshed_at, program_id = excluded.program_id`,
     )
-    .run(hash, question, result.source || null, result.answer, t, refreshed ? null : t, t);
+    .run(hash, question, result.source || null, result.answer, t, refreshed ? null : t, t, programId);
 }
 
 function staleCacheEntries(staleAfterMs: number, limit: number) {
   return db
     .handle()
     .query(
-      `SELECT question_hash, question, ask_count FROM answer_cache
+      `SELECT question_hash, question, ask_count, program_id FROM answer_cache
        WHERE COALESCE(refreshed_at, created_at) < ?
        ORDER BY ask_count DESC, COALESCE(refreshed_at, created_at) ASC
        LIMIT ?`,
@@ -137,6 +146,11 @@ function clearCache() {
   db.handle().query("DELETE FROM answer_cache").run();
 }
 
+function clearProgramCache(programId: string | null) {
+  if (programId === null) return db.handle().query("DELETE FROM answer_cache WHERE program_id IS NULL").run().changes;
+  return db.handle().query("DELETE FROM answer_cache WHERE program_id = ?").run(programId).changes;
+}
+
 function forget(hash: string) {
   db.handle().query("DELETE FROM answer_cache WHERE question_hash = ?").run(hash);
 }
@@ -155,5 +169,6 @@ export = {
   cachedCount,
   topCached,
   clearCache,
+  clearProgramCache,
   forget,
 };

@@ -59,6 +59,7 @@ interface SelectContextOptions {
   budget?: number;
   exclude?: Set<string> | string[] | null;
   generatedLast?: boolean;
+  requireEvidence?: boolean;
 }
 
 const MIN_CHUNK = 100;
@@ -599,7 +600,7 @@ function selectChunks(index: SearchIndex, question: string, budget = DEFAULT_BUD
   const selected: Chunk[] = [];
   let used = 0;
   for (const { chunk } of score(index, queryTerms)) {
-    if (used + chunk.text.length > budget) break;
+    if (used + chunk.text.length > budget) continue;
     selected.push(chunk);
     used += chunk.text.length;
   }
@@ -615,6 +616,7 @@ function selectContext({
   budget = DEFAULT_BUDGET,
   exclude = null,
   generatedLast = false,
+  requireEvidence = false,
 }: SelectContextOptions) {
   const dropped = exclude instanceof Set ? exclude : new Set(exclude || []);
   const kept = ([name]: Section) => !dropped.has(name);
@@ -644,6 +646,7 @@ function selectContext({
 
   const chunks = selectChunks(index, question, budget).filter((c) => !dropped.has(c.source));
   if (chunks.length === 0) {
+    if (requireEvidence) return enforceTotal(order([]));
     log.debug("retrieve", `no chunk matched "${(question || "").slice(0, 60)}" — sending capped corpus`);
     let used = 0;
     const capped: string[] = [];

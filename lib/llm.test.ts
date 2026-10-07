@@ -1,6 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const axios = require("axios");
+const db = require("./db");
 const llm = require("./llm");
 const { isRetryableStatus, isRetryableError } = llm;
 
@@ -198,6 +199,67 @@ test("completeStream does not retry once text has been streamed", async () => {
   assert.equal(attempts, 1);
 });
 
+test("completeStream deadline remains active after a delta and cancels the reader", async () => {
+  let cancelled = false;
+  const hangsAfterDelta: FetchImpl = async () =>
+    ({
+      ok: true,
+      status: 200,
+      text: async () => "",
+      body: {
+        getReader() {
+          let first = true;
+          return {
+            read: async () => {
+              if (first) {
+                first = false;
+                return { done: false, value: new TextEncoder().encode(sse("partial")) };
+              }
+              return new Promise<{ done: boolean }>(() => {});
+            },
+            cancel: async () => {
+              cancelled = true;
+            },
+          };
+        },
+      },
+    }) as unknown as MockFetchResponse;
+  await withFetch(hangsAfterDelta, async () => {
+    await assert.rejects(() => llm.completeStream({ ...REQUEST, timeout: 25 }, () => {}), /timed out/i);
+  });
+  assert.equal(cancelled, true);
+});
+
+test("completeStream requests and records terminal usage once with stable request id", async () => {
+  const entries: Record<string, unknown>[] = [];
+  const original = db.recordLlmUsage;
+  let requestBody: Record<string, unknown> | undefined;
+  db.recordLlmUsage = (entry: Record<string, unknown>) => entries.push(entry);
+  try {
+    const response: FetchImpl = async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return fakeFetch([
+        sse("answer"),
+        `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } })}\n`,
+        "data: [DONE]\n",
+      ])(_input, init);
+    };
+    await withFetch(response, () =>
+      llm.completeStream({ ...REQUEST, model: "gpt-4.1-nano", telemetry: { requestId: "stable" } }, () => {}),
+    );
+  } finally {
+    db.recordLlmUsage = original;
+  }
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].requestId, "stable");
+  assert.equal(entries[0].promptTokens, 10);
+  assert.equal(entries[0].completionTokens, 2);
+  assert.equal(entries[0].attempt, 1);
+  assert.equal(entries[0].retryCount, 0);
+  assert.ok(Math.abs(Number(entries[0].costUsd) - 0.0000018) < 1e-15);
+  assert.deepEqual(requestBody?.stream_options, { include_usage: true });
+});
+
 test("completeStream throws a non-retryable status straight away", async () => {
   let attempts = 0;
   const unauthorized = async (...args: Parameters<typeof fetch>) => {
@@ -237,6 +299,31 @@ test("completeStream falls back to the standby when the primary is unreachable",
 
   assert.equal(result.text, "from the standby");
   assert.deepEqual(seenUrls, ["standby"]);
+});
+
+test("completeStream shares one deadline across retries and fallback", async () => {
+  let primaryCalls = 0;
+  let standbyCalls = 0;
+  const fetchImpl = byBaseUrl({
+    "http://primary": async () => {
+      primaryCalls += 1;
+      return fakeFetch([], { status: 503 })("http://primary", {});
+    },
+    "http://standby": (...args: Parameters<typeof fetch>) => {
+      standbyCalls += 1;
+      return fakeFetch([sse("standby")])(...args);
+    },
+  });
+  const started = Date.now();
+  await withFetch(fetchImpl, async () => {
+    await assert.rejects(
+      () => llm.completeStream({ ...REQUEST, baseUrl: "http://primary", timeout: 50, fallback: STANDBY }, () => {}),
+      /timed out/i,
+    );
+  });
+  assert.ok(Date.now() - started < 250, "retry delay is bounded by the request deadline");
+  assert.equal(primaryCalls, 1);
+  assert.equal(standbyCalls, 0);
 });
 
 test("completeStream does not fall back once text has reached the reader", async () => {
@@ -436,6 +523,72 @@ test("retryable 429 is retried up to 3 attempts with backoff, then succeeds", as
     },
   );
   assert.equal(calls, 3, "3 attempts: 400/800/1600 backoff chain");
+});
+
+test("usage rows sum actual retries for completion and streaming attempts", async () => {
+  const entries: Record<string, unknown>[] = [];
+  const original = db.recordLlmUsage;
+  db.recordLlmUsage = (entry: Record<string, unknown>) => entries.push(entry);
+  try {
+    let completionCalls = 0;
+    await withAxiosPost(
+      async () => {
+        completionCalls += 1;
+        if (completionCalls < 3) throw Object.assign(new Error("retry"), { response: { status: 503 } });
+        return { data: { choices: [{ message: { content: "done" } }] } };
+      },
+      () => llm.complete({ ...REQUEST, telemetry: { requestId: "retry-count-completion" } }),
+    );
+
+    let streamCalls = 0;
+    const streamFetch: FetchImpl = async (...args) => {
+      streamCalls += 1;
+      if (streamCalls < 3) return fakeFetch([], { status: 503 })(...args);
+      return fakeFetch([sse("done")])(...args);
+    };
+    await withFetch(streamFetch, () =>
+      llm.completeStream({ ...REQUEST, telemetry: { requestId: "retry-count-stream" } }, () => {}),
+    );
+
+    const fallbackFetch = byBaseUrl({
+      "http://primary": (...args: Parameters<typeof fetch>) => fakeFetch([], { status: 401 })(...args),
+      "http://standby": (...args: Parameters<typeof fetch>) => fakeFetch([sse("fallback")])(...args),
+    });
+    await withFetch(fallbackFetch, () =>
+      llm.completeStream(
+        {
+          ...REQUEST,
+          baseUrl: "http://primary",
+          fallback: STANDBY,
+          telemetry: { requestId: "retry-count-fallback" },
+        },
+        () => {},
+      ),
+    );
+  } finally {
+    db.recordLlmUsage = original;
+  }
+
+  for (const requestId of ["retry-count-completion", "retry-count-stream"]) {
+    const rows = entries.filter((entry) => entry.requestId === requestId);
+    assert.deepEqual(
+      rows.map((entry) => entry.attempt),
+      [1, 2, 3],
+    );
+    assert.deepEqual(
+      rows.map((entry) => entry.retryCount),
+      [0, 1, 1],
+    );
+    assert.equal(
+      rows.reduce((sum, entry) => sum + Number(entry.retryCount), 0),
+      2,
+    );
+  }
+  const fallbackRows = entries.filter((entry) => entry.requestId === "retry-count-fallback");
+  assert.deepEqual(
+    fallbackRows.map((entry) => entry.retryCount),
+    [0, 1],
+  );
 });
 
 test("non-retryable 401 throws immediately with no retry", async () => {

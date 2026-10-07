@@ -72,6 +72,29 @@ test("stale dynamic sources cannot authorize an exact answer", () => {
   }
 });
 
+test("answers cached from a stale dynamic source are bypassed", () => {
+  const cache = require("./cache");
+  const knowledge = require("./knowledge");
+  const source = { name: "Current policy", type: "url", dynamic: true, url: "https://example.invalid/policy" };
+  const program = { id: "stale-cache-program", name: "Stale cache", sources: [source], sharedSources: false };
+  const originalProgram = programs.get;
+  const originalShared = programs.shared;
+  const originalEligibility = knowledge.sourceEligibility;
+  const question = "what is the current policy?";
+  cache.put(question, { source: source.name, answer: "old policy" }, undefined, program.id);
+  programs.get = (id: string) => (id === program.id ? program : null);
+  programs.shared = () => ({ id: "shared", sources: [], milestones: [] });
+  knowledge.sourceEligibility = () => ({ exactClaimsAllowed: false });
+  try {
+    assert.equal(lookup.cacheHit(question, "", program.id), null);
+  } finally {
+    programs.get = originalProgram;
+    programs.shared = originalShared;
+    knowledge.sourceEligibility = originalEligibility;
+    cache.forget(cache.keyFor(question, program.id));
+  }
+});
+
 test("grounding rejects related policy evidence and malformed fenced verdicts", () => {
   assert.equal(
     lookup.exactClaimAllowed(

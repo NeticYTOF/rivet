@@ -32,6 +32,7 @@ const INTENT_CONTEXT_LIMIT = 8;
 const MAX_CONTEXT_MESSAGES = 8;
 const MAX_CONTEXT_CHARS = 4000;
 const transientThreads = new Map<string, ThreadMessage[]>();
+const seedingThreads = new Map<string, Promise<void>>();
 
 function threadRows(threadTs: string): ThreadMessage[] {
   return transientThreads.get(threadTs) || [];
@@ -160,34 +161,48 @@ function hasSpokenInThread(threadTs: string) {
   return !!db.getThread(threadTs)?.rivet_spoke;
 }
 
-async function seedFromSlack(
+function shouldSeedFromSlack(threadTs: string | null, currentTs: string | null) {
+  // A brand-new root message is itself the whole thread. Recent channel history
+  // is fetched separately when needed, so conversations.replies would only
+  // return this same live message.
+  return Boolean(threadTs && (!currentTs || threadTs !== currentTs));
+}
+
+function seedFromSlack(
   client: SlackClient,
   channel: string,
   threadTs: string,
   botUserId: string,
   currentTs: string | null = null,
-) {
+): Promise<void> {
+  const inFlight = seedingThreads.get(threadTs);
+  if (inFlight) return inFlight;
   const existing = db.getThread(threadTs);
-  if (existing?.seeded && threadRows(threadTs).length) return;
+  if (existing?.seeded && threadRows(threadTs).length) return Promise.resolve();
 
-  db.touchThread(threadTs, channel, { seeded: true });
-
-  try {
-    const res = await client.conversations.replies({ channel, ts: threadTs, limit: SEED_LIMIT });
-    const messages = res.messages || [];
-    for (const m of messages) {
-      if (currentTs && m.ts === currentTs) continue;
-      const text = (m.text || "").trim();
-      if (!text) continue;
-      addToThread(threadTs, roleForMessage(m, botUserId), text, m.user || null, channel);
+  const seeding = (async () => {
+    try {
+      const res = await client.conversations.replies({ channel, ts: threadTs, limit: SEED_LIMIT });
+      const messages = res.messages || [];
+      for (const m of messages) {
+        if (currentTs && m.ts === currentTs) continue;
+        const text = (m.text || "").trim();
+        if (!text) continue;
+        addToThread(threadTs, roleForMessage(m, botUserId), text, m.user || null, channel);
+      }
+      db.touchThread(threadTs, channel, { seeded: true });
+      log.debug("context", `seeded thread ${threadTs} with ${messages.length} messages`);
+    } catch (error: unknown) {
+      log.debug(
+        "context",
+        `could not seed thread ${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      seedingThreads.delete(threadTs);
     }
-    log.debug("context", `seeded thread ${threadTs} with ${messages.length} messages`);
-  } catch (error: unknown) {
-    log.debug(
-      "context",
-      `could not seed thread ${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  })();
+  seedingThreads.set(threadTs, seeding);
+  return seeding;
 }
 
 function threadCrowd(messages: SlackMessage[], userId: string, botUserId: string) {
@@ -310,6 +325,7 @@ export = {
   getThreadMessages,
   hasSpokenInThread,
   seedFromSlack,
+  shouldSeedFromSlack,
   recentChannelMessages,
   threadCrowd,
   fetchThreadCrowd,

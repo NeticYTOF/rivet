@@ -20,9 +20,13 @@ function teamOfBody(body: SlackBody = {}): string | null {
   return null;
 }
 
-function workspaceOf(event: SlackBody = {}, body: SlackBody = {}): string | null {
+function explicitWorkspaceOf(event: SlackBody = {}, body: SlackBody = {}): string | null {
   if (event && typeof event.team === "string") return event.team;
-  return teamOfBody(body) || configuredWorkspaceId();
+  return teamOfBody(body);
+}
+
+function workspaceOf(event: SlackBody = {}, body: SlackBody = {}): string | null {
+  return explicitWorkspaceOf(event, body) || configuredWorkspaceId();
 }
 
 function scopedKey(workspaceId: string | null, suffix: string): string {
@@ -37,4 +41,4 @@ function channelKey(workspaceId: string | null, channelId: string): string {
   return scopedKey(workspaceId, channelId);
 }
 
-export = { configuredWorkspaceId, workspaceOf, threadKey, channelKey, DEFAULT_WORKSPACE };
+export = { configuredWorkspaceId, explicitWorkspaceOf, workspaceOf, threadKey, channelKey, DEFAULT_WORKSPACE };

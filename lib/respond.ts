@@ -88,6 +88,8 @@ interface RespondOptions {
   isDm?: boolean;
   surface?: string | null;
   rateLimitReserved?: boolean;
+  program?: Program | null;
+  programSettings?: Record<string, boolean> | null;
 }
 
 function errorMessage(error: unknown) {
@@ -557,16 +559,18 @@ async function respond({
   isDm,
   surface = null,
   rateLimitReserved = false,
+  program: programOverride = undefined,
+  programSettings = null,
 }: RespondOptions) {
   const trimmed = (question || "").trim();
   if (!trimmed) return false;
 
   const explicitDm = isDm === true || surface === "dm";
   const policy = channelPolicy.resolve(channel, workspaceId, { isDm: explicitDm });
-  const prog = policy.program;
+  const prog = programOverride === undefined ? policy.program : programOverride;
   const programId = prog ? prog.id : null;
   const role = policy.role === "none" && mode === ALWAYS ? "dm" : policy.role;
-  const settings = policy.settings;
+  const settings = programSettings || policy.settings;
   const inHelpChannel = role === "help";
   const isAddressed = addressed || mode === ALWAYS || role === "dm";
   const startedAt = Date.now();
@@ -621,7 +625,7 @@ async function respond({
     return false;
   }
 
-  if (seedClient && threadTs) {
+  if (seedClient && context.shouldSeedFromSlack(threadTs, messageTs || null)) {
     await context.seedFromSlack(seedClient, channel, threadTs, config.slack.botUserId, messageTs || threadTs);
   }
 

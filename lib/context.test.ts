@@ -141,16 +141,50 @@ test("seedFromSlack skips the live message and empty texts", async () => {
   assert.equal(context.getThreadContext("char-seed-1"), ctx);
 });
 
-test("seedFromSlack failure is non-fatal and still marks seeded", async () => {
+test("a new top-level message does not need a conversations.replies seed", () => {
+  assert.equal(context.shouldSeedFromSlack("10.3", "10.3"), false);
+  assert.equal(context.shouldSeedFromSlack("10.3", "11.4"), true);
+  assert.equal(context.shouldSeedFromSlack("10.3", null), true);
+  assert.equal(context.shouldSeedFromSlack(null, "11.4"), false);
+});
+
+test("seedFromSlack failure is non-fatal and retries on the next call", async () => {
+  let calls = 0;
   const failing = {
     conversations: {
       replies: async () => {
+        calls += 1;
+        if (calls > 1) return { messages: [{ ts: "1", text: "retried successfully", user: "U1" }] };
         throw new Error("channel_not_found");
       },
     },
   };
   await assert.doesNotReject(() => context.seedFromSlack(failing, "C1", "char-seed-fail", "UBOT"));
   assert.equal(context.getThreadContext("char-seed-fail"), null);
+  await context.seedFromSlack(failing, "C1", "char-seed-fail", "UBOT");
+  assert.equal(calls, 2);
+  assert.match(context.getThreadContext("char-seed-fail") || "", /retried successfully/);
+});
+
+test("seedFromSlack shares an in-flight Slack request for the same thread", async () => {
+  let calls = 0;
+  let finish!: (value: { messages: { ts: string; text: string; user: string }[] }) => void;
+  const client = {
+    conversations: {
+      replies: () => {
+        calls += 1;
+        return new Promise<{ messages: { ts: string; text: string; user: string }[] }>((resolve) => {
+          finish = resolve;
+        });
+      },
+    },
+  };
+  const first = context.seedFromSlack(client, "C1", "char-seed-flight", "UBOT");
+  const second = context.seedFromSlack(client, "C1", "char-seed-flight", "UBOT");
+  assert.equal(calls, 1);
+  finish({ messages: [{ ts: "1", text: "shared result", user: "U1" }] });
+  await Promise.all([first, second]);
+  assert.match(context.getThreadContext("char-seed-flight") || "", /shared result/);
 });
 
 test("bot messages seed as assistant role", async () => {

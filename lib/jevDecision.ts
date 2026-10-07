@@ -288,6 +288,7 @@ function classifyError(err: JevError | null | undefined): string {
 const decisionCache = new Map();
 const inflightEvaluations = new Map();
 const jevStats = { calls: 0, cacheHits: 0 };
+const MAX_CACHE_ENTRIES = 2048;
 
 function jevCacheTtlMs() {
   const n = Number(process.env.JEV_CACHE_TTL_MS);
@@ -312,7 +313,18 @@ function cacheKeyFor({ model, state }: { model: string; state: JevState }): stri
 }
 
 function getStats() {
-  return { ...jevStats };
+  return { ...jevStats, cacheSize: decisionCache.size };
+}
+
+function pruneDecisionCache(now = Date.now()) {
+  for (const [key, hit] of decisionCache) {
+    if (hit.expiresAt <= now) decisionCache.delete(key);
+  }
+  while (decisionCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = decisionCache.keys().next().value;
+    if (oldest === undefined) break;
+    decisionCache.delete(oldest);
+  }
 }
 
 function clearDecisionCache() {
@@ -412,6 +424,8 @@ async function evaluateSupportDecision(
     const hit = decisionCache.get(key);
     // cache side effects
     if (hit && hit.expiresAt > Date.now()) {
+      decisionCache.delete(key);
+      decisionCache.set(key, hit);
       jevStats.cacheHits += 1;
       try {
         require("./db").recordMetric("jev_cache_hit", 0, hit.result.action || null, state.program?.id || null);
@@ -422,6 +436,7 @@ async function evaluateSupportDecision(
       );
       return { ...hit.result, latencyMs: 0, cached: true };
     }
+    if (hit) decisionCache.delete(key);
     // shared in-flight promise
     if (inflightEvaluations.has(key)) return inflightEvaluations.get(key);
   }
@@ -455,7 +470,10 @@ async function evaluateSupportDecision(
       const outcome = { action, intent: decision.intent, shouldEngageP, reason, latencyMs, errorKind: null };
       if (key) {
         jevStats.calls += 1;
+        pruneDecisionCache();
+        decisionCache.delete(key);
         decisionCache.set(key, { expiresAt: Date.now() + jevCacheTtlMs(), result: outcome });
+        pruneDecisionCache();
       }
       return outcome;
     } catch (err) {
@@ -557,4 +575,5 @@ export = {
   MAX_MESSAGE_CHARS,
   MAX_CONTEXT_CHARS,
   INTENT_CHOICES,
+  MAX_CACHE_ENTRIES,
 };

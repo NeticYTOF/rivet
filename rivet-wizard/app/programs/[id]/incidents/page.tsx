@@ -129,8 +129,11 @@ type IncidentDetail = {
 };
 
 export async function IncidentDetailSection({ programId, incidentId }: { programId: string; incidentId: number }) {
-  const detail = (await coreIncidentDetail(incidentId)) as IncidentDetail;
-  const affected = await coreIncidentAffected(incidentId).catch(() => null);
+  const [detailResult, affected] = await Promise.all([
+    coreIncidentDetail(incidentId),
+    coreIncidentAffected(incidentId).catch(() => null),
+  ]);
+  const detail = detailResult as IncidentDetail;
   const inc = detail.incident;
   const isOpen = inc.status === "confirmed";
 

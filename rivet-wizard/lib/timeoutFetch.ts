@@ -14,35 +14,101 @@
 // fake module instead of the real exports.
 export const REQUEST_TIMEOUT_MS = 10_000;
 
-// `timeoutMs` defaults to REQUEST_TIMEOUT_MS for every real caller; it's only
-// overridden in tests so a timeout case doesn't have to wait out the real 10s.
-//
-// Combines the timeout signal with any caller-supplied signal via
-// AbortSignal.any so BOTH can abort the request — passing only init?.signal
-// would silently drop the timeout whenever a caller signal is present, and
-// passing only the timeout signal would silently drop caller aborts.
-// AbortSignal.any and AbortSignal.timeout both handle their own listener
-// wiring/cleanup internally, so there's nothing here to leak.
+function createDeadline(timeoutMs: number, callerSignal?: AbortSignal) {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  let callerAborted = false;
+  let onCallerAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const rejectAbort = (reason: unknown) => reject(reason ?? new DOMException("The operation was aborted.", "AbortError"));
+    onCallerAbort = () => {
+      callerAborted = true;
+      controller.abort(callerSignal?.reason);
+      rejectAbort(callerSignal?.reason);
+    };
+    if (callerSignal?.aborted) {
+      onCallerAbort();
+      return;
+    }
+    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+    timer = setTimeout(() => {
+      timedOut = true;
+      const error = new Error(`request timed out after ${timeoutMs}ms`);
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+
+  return {
+    controller,
+    aborted,
+    get timedOut() { return timedOut; },
+    get callerAborted() { return callerAborted; },
+    cleanup() {
+      if (timer) clearTimeout(timer);
+      if (onCallerAbort) callerSignal?.removeEventListener("abort", onCallerAbort);
+    },
+  };
+}
+
+// `timeoutMs` defaults to REQUEST_TIMEOUT_MS; tests override it to keep timeout
+// cases fast. The same deadline covers headers and response-body parsing.
 export function timeoutFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
   timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
+  const deadline = createDeadline(timeoutMs, init?.signal || undefined);
+  if (deadline.callerAborted) return deadline.aborted;
+  const request = fetch(input, { ...init, signal: deadline.controller.signal });
+  return Promise.race([request, deadline.aborted]).finally(deadline.cleanup);
+}
 
-  // Rely on the abort signal AND on a timer. The signal alone is not a
-  // sufficient bound: an abort is only observed by whoever happens to be
-  // listening, and the request is only actually cancelled if the underlying
-  // fetch honours it. Racing the promise guarantees the caller gets a thrown
-  // error at the deadline even when neither fires — which is the entire point
-  // of this module. Without the race, an unreachable host can hang the caller
-  // indefinitely, which is the failure this exists to prevent.
-  return Promise.race([
-    fetch(input, { ...init, signal }),
-    new Promise<never>((_resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`request timed out after ${timeoutMs}ms`)), timeoutMs);
-      signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
-    }),
-  ]);
+export async function timeoutFetchJson(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<{ response: Response; body: unknown }> {
+  const deadline = createDeadline(timeoutMs, init?.signal || undefined);
+  if (deadline.callerAborted) return deadline.aborted;
+
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  try {
+    const response = await Promise.race([
+      fetch(input, { ...init, signal: deadline.controller.signal }),
+      deadline.aborted,
+    ]);
+    let text = "";
+    if (response.body) {
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await Promise.race([reader.read(), deadline.aborted]);
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    }
+
+    let body: unknown = {};
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Match the previous res.json().catch(() => ({})) behavior for malformed or empty JSON.
+    }
+    return { response, body };
+  } finally {
+    deadline.cleanup();
+    if (reader) {
+      if (deadline.timedOut || deadline.callerAborted) {
+        void reader.cancel().catch(() => undefined);
+      }
+      try {
+        reader.releaseLock();
+      } catch {
+        // A timed-out read can still be pending while its stream is cancelled.
+      }
+    }
+  }
 }

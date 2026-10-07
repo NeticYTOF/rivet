@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { isAllowed, setSessionCookie } from "@/lib/session";
-import { timeoutFetch } from "@/lib/timeoutFetch";
+import { timeoutFetchJson } from "@/lib/timeoutFetch";
 import { isSuperadminSession, ownProgramPath } from "@/lib/programAccess";
 
 const HCA_BASE_URL = "https://auth.hackclub.com";
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     return fail("state", `code=${Boolean(code)} state=${Boolean(state)} expected=${Boolean(expected)} match=${state === expected}`);
   }
 
-  const tokenRes = await timeoutFetch(`${HCA_BASE_URL}/oauth/token`, {
+  const tokenResult = await timeoutFetchJson(`${HCA_BASE_URL}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -58,18 +58,24 @@ export async function GET(req: NextRequest) {
     }),
   });
 
+  const tokenRes = tokenResult.response;
   if (!tokenRes.ok) return fail("token", `HCA /oauth/token returned ${tokenRes.status}`);
 
-  const tokens = (await tokenRes.json()) as HackClubTokenResponse;
+  const tokens = tokenResult.body as HackClubTokenResponse;
+  if (!tokens || typeof tokens.access_token !== "string") {
+    return fail("token", "HCA /oauth/token returned no access token");
+  }
 
-  const meRes = await timeoutFetch(`${HCA_BASE_URL}/api/v1/me`, {
+  const meResult = await timeoutFetchJson(`${HCA_BASE_URL}/api/v1/me`, {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   });
+  const meRes = meResult.response;
 
   if (!meRes.ok) return fail("identity", `HCA /api/v1/me returned ${meRes.status}`);
 
-  const me = (await meRes.json()) as HackClubMeResponse;
+  const me = meResult.body as HackClubMeResponse;
   const identity = me.identity;
+  if (!identity || typeof identity.id !== "string") return fail("identity", "HCA /api/v1/me returned no identity");
   const email = identity.primary_email;
   if (!email) {
     return fail("no-email", `hca identity ${identity.id} has no primary_email (verification_status=${identity.verification_status ?? "unknown"})`);
