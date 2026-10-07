@@ -169,6 +169,38 @@ test("completeStream retries an attempt that streamed nothing", async () => {
   assert.equal(result.text, "recovered");
 });
 
+test("streamCompletion aborts if the stream stalls after emitting text", async () => {
+  let reads = 0;
+  const stallsAfterFirstToken: FetchImpl = async (_input, init) => ({
+    ok: true,
+    status: 200,
+    text: async () => "",
+    body: {
+      getReader() {
+        return {
+          read: async () => {
+            reads += 1;
+            if (reads === 1) {
+              return { done: false, value: new TextEncoder().encode(sse("partial")) };
+            }
+            return await new Promise<{ done: boolean; value?: Uint8Array }>((_resolve, reject) => {
+              const signal = init?.signal;
+              const abort = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+              if (signal?.aborted) abort();
+              else signal?.addEventListener("abort", abort, { once: true });
+            });
+          },
+        };
+      },
+    },
+  });
+
+  await withFetch(stallsAfterFirstToken, async () => {
+    await assert.rejects(() => llm.streamCompletion({ ...REQUEST, timeout: 25 }, () => {}), /aborted/i);
+  });
+  assert.equal(reads, 2);
+});
+
 test("completeStream does not retry once text has been streamed", async () => {
   let attempts = 0;
   const breaksMidStream: FetchImpl = async (_input, _init) => {
