@@ -63,6 +63,71 @@ test("RIVET_PROGRAMS_JSON supplies neutral programs and takes precedence", () =>
   );
 });
 
+test("program normalization preserves the grounded-answer setting", () => {
+  withEnvPrograms(JSON.stringify([{ id: "loadout", requireGroundedAnswer: true }]), () => {
+    assert.equal(programs.get("loadout").requireGroundedAnswer, true);
+  });
+});
+
+test("saving changed program knowledge clears only that program's cached answers", () => {
+  const cache = require("./cache");
+  const question = "cache stale after program configuration change";
+  programs.saveProgram({
+    id: "cache-config-owner",
+    name: "Cache owner",
+    sources: [{ name: "Rules", type: "text", content: "the old rule" }],
+    sharedSources: false,
+  } as any);
+  programs.saveProgram({
+    id: "cache-config-other",
+    name: "Other",
+    sources: [{ name: "Rules", type: "text", content: "other rule" }],
+    sharedSources: false,
+  } as any);
+  cache.put(question, { source: "Rules", answer: "old rule" }, undefined, "cache-config-owner");
+  cache.put(question, { source: "Rules", answer: "other rule" }, undefined, "cache-config-other");
+
+  programs.saveProgram({
+    ...programs.get("cache-config-owner"),
+    sources: [{ name: "Rules", type: "text", content: "the new rule" }],
+  });
+
+  assert.equal(cache.get(question, "cache-config-owner"), null);
+  assert.equal(cache.get(question, "cache-config-other")?.answer, "other rule");
+});
+
+test("saving answer routing and source policy changes clears that program's cached answers", () => {
+  const cache = require("./cache");
+  const programId = "cache-policy-owner";
+  const question = "cache stale after answer policy change";
+  programs.saveProgram({
+    id: programId,
+    name: "Policy owner",
+    helpChannel: "C_HELP_OLD",
+    channels: ["C_MAIN_OLD"],
+    sources: [{ name: "Status", type: "url", url: "https://example.invalid/status", dynamic: false, paths: ["/old"] }],
+    sharedSources: false,
+  } as any);
+  cache.put(question, { source: "Status", answer: "old answer" }, undefined, programId);
+
+  programs.saveProgram({ ...programs.get(programId), helpChannel: "C_HELP_NEW" });
+  assert.equal(cache.get(question, programId), null);
+
+  cache.put(question, { source: "Status", answer: "old answer" }, undefined, programId);
+  programs.saveProgram({
+    ...programs.get(programId),
+    sources: [{ name: "Status", type: "url", url: "https://example.invalid/status", dynamic: true, paths: ["/old"] }],
+  });
+  assert.equal(cache.get(question, programId), null);
+
+  cache.put(question, { source: "Status", answer: "old answer" }, undefined, programId);
+  programs.saveProgram({
+    ...programs.get(programId),
+    sources: [{ name: "Status", type: "url", url: "https://example.invalid/status", dynamic: true, paths: ["/new"] }],
+  });
+  assert.equal(cache.get(question, programId), null);
+});
+
 test("wrapped and malformed environment configuration are handled safely", () => {
   withEnvPrograms(JSON.stringify({ programs: [{ id: "beta", name: "Beta" }] }), () => {
     assert.equal(programs.get("beta").name, "Beta");

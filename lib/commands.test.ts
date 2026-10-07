@@ -326,6 +326,119 @@ test("/rivet ask parity — docs hit answers ephemerally, miss chats, error fall
   }
 });
 
+test("/rivet ask uses the resolved program in an allowed general fallback", async () => {
+  const respond = require("./respond");
+  const chat = require("./chat");
+  const channelPolicy = require("./channelPolicy");
+  const originalLookup = respond.lookupAnswer;
+  const originalChat = chat.getChatReply;
+  const originalResolve = channelPolicy.resolve;
+  const savedGrounded = process.env.RIVET_REQUIRE_GROUNDED_ANSWER;
+  const sent: any[] = [];
+  let fallbackContext = "";
+  delete process.env.RIVET_REQUIRE_GROUNDED_ANSWER;
+  channelPolicy.resolve = () => ({
+    role: "main",
+    program: { id: "grounded", name: "Grounded", requireGroundedAnswer: false },
+    settings: { enabled: true },
+  });
+  respond.lookupAnswer = async () => null;
+  chat.getChatReply = async (_question: string, context: string) => {
+    fallbackContext = context;
+    return "fallback";
+  };
+  try {
+    await commands.askCommand({
+      command: { text: "what is the rule", user_id: "U1", channel_id: "C-GROUNDED" },
+      ack: async () => {},
+      respond: async (payload: any) => sent.push(payload),
+    });
+  } finally {
+    respond.lookupAnswer = originalLookup;
+    chat.getChatReply = originalChat;
+    channelPolicy.resolve = originalResolve;
+    if (savedGrounded === undefined) delete process.env.RIVET_REQUIRE_GROUNDED_ANSWER;
+    else process.env.RIVET_REQUIRE_GROUNDED_ANSWER = savedGrounded;
+  }
+  assert.match(fallbackContext, /Grounded program/);
+  assert.equal(sent[0].text, "fallback");
+});
+
+test("/rivet ask help resolves a program with the workspace identity", async () => {
+  const programs = require("./programs");
+  const originalForChannel = programs.forChannel;
+  const calls: Array<{ channel: string; workspaceId?: string | null }> = [];
+  const sent: any[] = [];
+  programs.forChannel = (channel: string, workspaceId?: string | null) => {
+    calls.push({ channel, workspaceId });
+    return { id: workspaceId === "T-HELP-OWNER" ? "owner-program" : "other-program", name: "Help" };
+  };
+  try {
+    await commands.askCommand({
+      command: { text: "help", user_id: "U1", channel_id: "C-COLLIDING", team_id: "T-HELP-OWNER" },
+      ack: async () => {},
+      respond: async (payload: any) => sent.push(payload),
+    });
+  } finally {
+    programs.forChannel = originalForChannel;
+  }
+  assert.deepEqual(calls, [{ channel: "C-COLLIDING", workspaceId: "T-HELP-OWNER" }]);
+  assert.equal(sent.length, 1);
+});
+
+test("/rivet ask skips cache and blocks general chat when grounded lookup has no answer", async () => {
+  const respond = require("./respond");
+  const chat = require("./chat");
+  const channelPolicy = require("./channelPolicy");
+  const originalLookup = respond.lookupAnswer;
+  const originalChat = chat.getChatReply;
+  const originalResolve = channelPolicy.resolve;
+  const savedGrounded = process.env.RIVET_REQUIRE_GROUNDED_ANSWER;
+  const sent: any[] = [];
+  const lookupOptions: any[] = [];
+  let generalChatCalls = 0;
+  channelPolicy.resolve = (channel: string) => ({
+    role: "main",
+    program: { id: "grounded", name: "Grounded", requireGroundedAnswer: channel.endsWith("-0") },
+    settings: { enabled: true },
+  });
+  respond.lookupAnswer = async (...args: any[]) => {
+    lookupOptions.push(args[4]);
+    return null;
+  };
+  chat.getChatReply = async () => {
+    generalChatCalls += 1;
+    return "unsupported answer";
+  };
+  try {
+    for (const [index, globalOnly] of [false, true].entries()) {
+      if (globalOnly) process.env.RIVET_REQUIRE_GROUNDED_ANSWER = "1";
+      else delete process.env.RIVET_REQUIRE_GROUNDED_ANSWER;
+      await commands.askCommand({
+        command: { text: "when is the deadline?", user_id: "U1", channel_id: `C-GROUNDED-${index}` },
+        ack: async () => {},
+        respond: async (payload: any) => sent.push(payload),
+      });
+    }
+  } finally {
+    respond.lookupAnswer = originalLookup;
+    chat.getChatReply = originalChat;
+    channelPolicy.resolve = originalResolve;
+    if (savedGrounded === undefined) delete process.env.RIVET_REQUIRE_GROUNDED_ANSWER;
+    else process.env.RIVET_REQUIRE_GROUNDED_ANSWER = savedGrounded;
+  }
+  assert.equal(lookupOptions.length, 2);
+  assert.deepEqual(
+    lookupOptions.map((options) => options?.skipCache),
+    [true, true],
+  );
+  assert.equal(generalChatCalls, 0);
+  assert.deepEqual(
+    sent.map((payload) => payload.text),
+    [respond.MENTION_FALLBACK, respond.MENTION_FALLBACK],
+  );
+});
+
 test("/rivet-check dispatches to the deterministic path", async () => {
   const validator = require("./validator");
   const respond = require("./respond");

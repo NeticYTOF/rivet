@@ -216,6 +216,8 @@ const MIGRATIONS = [
   ["answer_cache", "ask_count", "ALTER TABLE answer_cache ADD COLUMN ask_count INTEGER NOT NULL DEFAULT 1"],
   ["answer_cache", "last_asked_at", "ALTER TABLE answer_cache ADD COLUMN last_asked_at INTEGER"],
   ["answer_cache", "refreshed_at", "ALTER TABLE answer_cache ADD COLUMN refreshed_at INTEGER"],
+  ["answer_cache", "program_id", "ALTER TABLE answer_cache ADD COLUMN program_id TEXT"],
+  ["answer_cache_identity_v2", "table", "CREATE TABLE answer_cache_identity_v2 (version INTEGER PRIMARY KEY)"],
 
   ["doc_gaps", "kind", "ALTER TABLE doc_gaps ADD COLUMN kind TEXT"],
   ["metrics", "detail", "ALTER TABLE metrics ADD COLUMN detail TEXT"],

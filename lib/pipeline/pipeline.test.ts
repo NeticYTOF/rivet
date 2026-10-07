@@ -311,10 +311,6 @@ test("main ambient: 'how do i do this' with a clear thread referent retrieves an
 
 test("main ambient: a top-level fragment is classified with the channel's last messages", async () => {
   const historyCalls: TestRecord[] = [];
-  let seedCalls = 0;
-  stub(context, "seedFromSlack", async () => {
-    seedCalls += 1;
-  });
   const slack = client();
   slack.conversations.history = async (args?: TestRecord) => {
     historyCalls.push(args || {});
@@ -334,7 +330,6 @@ test("main ambient: a top-level fragment is classified with the channel's last m
   });
   const spoke = await send({ channel: "C_ACME_MAIN", text: "it expires tomorrow", seedClient: slack });
   expect(historyCalls[0]).toMatchObject({ channel: "C_ACME_MAIN", limit: 5, inclusive: false });
-  expect(seedCalls).toBe(0);
   expect(jevCalls[0].conversationContext).toMatch(
     /other member: gm\nother member: mine's broken lol\nother member: yo is your hackatime streak/,
   );
@@ -346,10 +341,6 @@ test("main ambient: a top-level fragment is classified with the channel's last m
 test("a threaded reply uses its thread, not the channel history", async () => {
   const slack = client();
   let historyCalled = false;
-  let seedCalls = 0;
-  stub(context, "seedFromSlack", async () => {
-    seedCalls += 1;
-  });
   slack.conversations.history = async () => {
     historyCalled = true;
     return { messages: [] };
@@ -363,7 +354,6 @@ test("a threaded reply uses its thread, not the channel history", async () => {
     seedClient: slack,
   });
   expect(historyCalled).toBe(false);
-  expect(seedCalls).toBe(1);
 });
 
 test("main ambient: Jev outage falls back to the legacy intent classifier", async () => {

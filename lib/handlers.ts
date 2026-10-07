@@ -41,6 +41,7 @@ interface HandlerEvent {
 interface HandlerArgs {
   event: HandlerEvent;
   client: SlackClient;
+  body?: { team_id?: string; team?: { id?: string } };
 }
 interface ImageArgs extends HandlerArgs {
   imageFile: SlackFile;
@@ -130,7 +131,8 @@ interface HandlerPolicy {
   resolve(channel: string, workspaceId?: string | null, options?: { isDm?: boolean }): ProgramPolicy;
 }
 interface HandlerWorkspace {
-  workspaceOf(event: HandlerEvent): string | null;
+  workspaceOf(event: HandlerEvent, body?: { team_id?: string; team?: { id?: string } }): string | null;
+  explicitWorkspaceOf(event: HandlerEvent, body?: { team_id?: string; team?: { id?: string } }): string | null;
 }
 interface HandlerVision {
   analyzeImage(
@@ -139,7 +141,10 @@ interface HandlerVision {
     context?: string,
     token?: string,
     docs?: string,
+    requireGrounded?: boolean,
   ): Promise<string | null>;
+  isGroundedImageReply(reply: string, question: string, docs: string): boolean;
+  groundedImageReply(reply: string, question: string, docs: string): string | null;
 }
 interface HandlerLearn {
   parseTeach(text: string): { question: string; answer: string } | null;
@@ -285,17 +290,27 @@ async function handleImage({ event, client, imageFile, program = null }: ImageAr
       context.getThreadContext(threadTs),
       config.slack.botToken,
       docs,
+      Boolean(program?.requireGroundedAnswer || process.env.RIVET_REQUIRE_GROUNDED_ANSWER === "1"),
     );
 
-    if (reply) {
+    const requiresGrounding = Boolean(
+      program?.requireGroundedAnswer || process.env.RIVET_REQUIRE_GROUNDED_ANSWER === "1",
+    );
+    const groundedReply = reply && requiresGrounding ? vision.groundedImageReply(reply, question, docs) : reply;
+    if (reply && requiresGrounding && !groundedReply) {
+      db.recordMetric("silent", null, "vision_ungrounded", program?.id || null);
+      return;
+    }
+
+    if (groundedReply) {
       await require("./slackMessages").sendProgramMessage({
         client,
         program,
         channel: event.channel,
         threadTs,
-        text: replyText.plainDashes(reply),
+        text: replyText.plainDashes(groundedReply),
       });
-      context.addToThread(threadTs, "assistant", reply, null, event.channel);
+      context.addToThread(threadTs, "assistant", groundedReply, null, event.channel);
       context.updateUserHistory(event.user, question || "image analysis", true);
       db.recordMetric("answer_vision");
     } else {
@@ -357,6 +372,7 @@ async function escalateSensitive({
   threadTs,
   question,
   addressed,
+  allowTicket = true,
 }: {
   event: HandlerEvent;
   client: SlackClient;
@@ -365,20 +381,23 @@ async function escalateSensitive({
   threadTs: string;
   question: string;
   addressed: boolean;
+  allowTicket?: boolean;
 }): Promise<void> {
   const tickets = require("./tickets");
   db.recordGap(question, event.user, event.channel, threadTs, prog.id);
   let ticket = null;
   try {
-    ticket = await tickets.escalateTicket({
-      program: prog,
-      channel: event.channel,
-      threadTs,
-      requesterId: event.user,
-      question,
-      client,
-      workspaceId,
-    });
+    if (allowTicket) {
+      ticket = await tickets.escalateTicket({
+        program: prog,
+        channel: event.channel,
+        threadTs,
+        requesterId: event.user,
+        question,
+        client,
+        workspaceId,
+      });
+    }
   } catch (e: unknown) {
     log.warn("handlers", `sensitive escalation ticket failed: ${errorMessage(e)}`);
   }
@@ -843,7 +862,7 @@ async function handleMacroTrigger({
 }
 
 // channel ownership
-async function onMessage({ event, client }: HandlerArgs): Promise<void> {
+async function onMessage({ event, client, body }: HandlerArgs): Promise<void> {
   if (event.bot_id || event.subtype === "bot_message") return;
   if (stagingBlocked(event.channel)) return;
 
@@ -856,7 +875,7 @@ async function onMessage({ event, client }: HandlerArgs): Promise<void> {
   const named = mentionsRivetByName(question);
   const pinged = mentionsRivetDirectly(question);
 
-  const workspaceId = workspace.workspaceOf(event);
+  const workspaceId = workspace.workspaceOf(event, body);
   if (await handleMacroTrigger({ event, client, workspaceId })) return;
   let productionProgramMatch = null;
   try {
@@ -1054,7 +1073,7 @@ async function onMessage({ event, client }: HandlerArgs): Promise<void> {
   }
 
   if (pinged) {
-    await onAppMention({ event, client });
+    await onAppMention({ event, client, body });
     return;
   }
 
@@ -1187,10 +1206,11 @@ async function onMessage({ event, client }: HandlerArgs): Promise<void> {
 }
 
 // duplicate delivery
-async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
+async function onAppMention({ event, client, body }: HandlerArgs): Promise<void> {
   if (event.bot_id || event.subtype === "bot_message" || event.user === config.slack.botUserId) return;
   if (stagingBlocked(event.channel)) return;
-  const workspaceId = workspace.workspaceOf(event);
+  const workspaceId = workspace.workspaceOf(event, body);
+  const explicitWorkspaceId = workspace.explicitWorkspaceOf(event, body);
   const question = stripBotMention(event.text);
   const threadTs = event.thread_ts || event.ts;
 
@@ -1199,10 +1219,17 @@ async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
   // otherwise ignores. Without this, mentions in report-only rooms like
   // #loadout-development die silently at the role gate below.
   const mentionedOutside = policy.role === "none";
-  const prog = mentionedOutside ? programs.get("loadout") : policy.program;
+  let prog = mentionedOutside ? programs.get("loadout") || programs.shared() : policy.program;
+  if (mentionedOutside && prog?.workspaceId && (!explicitWorkspaceId || prog.workspaceId !== explicitWorkspaceId))
+    prog = programs.shared();
   if (!mentionedOutside && !["help", "main", "organizer"].includes(policy.role)) return;
   if (!prog) return;
-  if (policy.settings && policy.settings.enabled === false) return;
+  const selectedSettings = mentionedOutside ? require("./programModel").behaviorFor(prog).main : policy.settings;
+  const settings =
+    selectedSettings && require("./programModel").statusFor(prog) === "paused"
+      ? { ...selectedSettings, enabled: false }
+      : selectedSettings;
+  if (settings && settings.enabled === false) return;
 
   if (db.wasAnswered(event.ts)) return;
 
@@ -1244,7 +1271,16 @@ async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
   if (eligibility === "stop") return;
   if (eligibility === "escalate") {
     if (!db.claimMessage(event.ts, event.channel)) return;
-    await escalateSensitive({ event, client, prog, workspaceId, threadTs, question, addressed: true });
+    await escalateSensitive({
+      event,
+      client,
+      prog,
+      workspaceId,
+      threadTs,
+      question,
+      addressed: true,
+      allowTicket: !mentionedOutside,
+    });
     return;
   }
 
@@ -1257,7 +1293,7 @@ async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
   const imageFile = findImage(event);
   if (imageFile) {
     if (!db.claimMessage(event.ts, event.channel)) return;
-    await handleImage({ event, client, imageFile, program: programs.forChannel(event.channel, workspaceId) });
+    await handleImage({ event, client, imageFile, program: prog });
     return;
   }
 
@@ -1275,6 +1311,8 @@ async function onAppMention({ event, client }: HandlerArgs): Promise<void> {
     seedClient: client,
     addressed: true,
     addressedHow: "mention",
+    program: prog,
+    programSettings: settings,
   });
 }
 

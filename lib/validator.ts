@@ -20,7 +20,7 @@ interface ValidationResult {
   tips?: string[];
 }
 const GITHUB_URL_REGEX =
-  /(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)(?:\/|\.git|\/tree\/[a-zA-Z0-9_.-]+)?/i;
+  /(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)(?:\.git)?(?:\/tree\/([^?#\s]+))?/i;
 
 const OPEN_SOURCE_LICENSES = [
   { id: "mit", name: "MIT License", regex: /\bMIT License|\bPermission is hereby granted, free of charge/i },
@@ -50,24 +50,75 @@ function parseGithubUrl(text: string | null | undefined) {
   if (!text) return null;
   const match = String(text).match(GITHUB_URL_REGEX);
   if (!match) return null;
+  const treePath = (match[3] || "").replace(/\/+$/, "");
+  const treeSegments = treePath ? treePath.split("/") : [];
+  // An unescaped slash is ambiguous between a slash-containing branch name and
+  // a branch followed by a subdirectory. Do not silently validate the first
+  // segment; users can percent-encode a slash-containing ref.
+  const encodedSlashRef = /%2f/i.test(treeSegments[0] || "");
+  const unsupportedTreePath = treeSegments.length > 1 && !encodedSlashRef;
   let owner = match[1];
   let repo = match[2];
   if (repo.endsWith(".git")) repo = repo.slice(0, -4);
-  return { owner, repo, fullName: `${owner}/${repo}`, url: `https://github.com/${owner}/${repo}` };
+  let branch: string | null = null;
+  const rawBranch = treeSegments[0];
+  if (rawBranch) {
+    try {
+      branch = decodeURIComponent(rawBranch);
+    } catch {
+      branch = rawBranch;
+    }
+  }
+  return {
+    owner,
+    repo,
+    branch,
+    unsupportedTreePath,
+    fullName: `${owner}/${repo}`,
+    url: `https://github.com/${owner}/${repo}`,
+  };
 }
 
-async function fetchRawFile(owner: string, repo: string, filename: string) {
-  // Branch fallback
-  const branches = ["main", "master"];
-  for (const branch of branches) {
-    try {
-      const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filename}`;
-      const res = await axios.get(url, { timeout: 8000 });
-      if (res.status === 200 && typeof res.data === "string") {
-        return res.data;
-      }
-    } catch {}
+const DEFAULT_BRANCH_TTL_MS = 5 * 60 * 1000;
+const defaultBranchCache = new Map<string, { branch: string; expiresAt: number }>();
+const defaultBranchInflight = new Map<string, Promise<string>>();
+
+async function resolveDefaultBranch(owner: string, repo: string): Promise<string> {
+  const key = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+  const cached = defaultBranchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.branch;
+  if (cached) defaultBranchCache.delete(key);
+  const current = defaultBranchInflight.get(key);
+  if (current) return current;
+
+  const lookup = (async () => {
+    const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+    const token = process.env.RIVET_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, { timeout: 8000, headers });
+    const branch = response.data?.default_branch;
+    if (response.status !== 200 || typeof branch !== "string" || !branch.trim()) {
+      throw new Error("GitHub did not return a default branch");
+    }
+    defaultBranchCache.set(key, { branch, expiresAt: Date.now() + DEFAULT_BRANCH_TTL_MS });
+    return branch;
+  })();
+  defaultBranchInflight.set(key, lookup);
+  try {
+    return await lookup;
+  } finally {
+    if (defaultBranchInflight.get(key) === lookup) defaultBranchInflight.delete(key);
   }
+}
+
+async function fetchRawFile(owner: string, repo: string, filename: string, branch: string) {
+  const branchPath = branch
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branchPath}/${filename}`;
+  const res = await axios.get(url, { timeout: 8000 });
+  if (res.status === 200 && typeof res.data === "string") return res.data;
   return null;
 }
 
@@ -110,31 +161,54 @@ function analyzeReadme(readmeText: string | null): ReadmeAnalysis {
   };
 }
 
-async function validateRepository(ownerOrUrl: string, repoName: string | null = null) {
+async function validateRepository(
+  ownerOrUrl: string,
+  repoName: string | null = null,
+  requestedBranch: string | null = null,
+) {
   let owner = ownerOrUrl;
   let repo = repoName || "";
+  let branch = requestedBranch;
 
   if (!repoName) {
     const parsed = parseGithubUrl(ownerOrUrl);
     if (!parsed) return { ok: false, error: "Could not parse a valid GitHub repository URL." };
     owner = parsed.owner;
     repo = parsed.repo;
+    if (parsed.unsupportedTreePath) {
+      return {
+        ok: false,
+        error:
+          "Could not validate a nested GitHub tree URL. Use the repository root or a /tree/<branch> URL; percent-encode slashes in branch names.",
+      };
+    }
+    branch ||= parsed.branch;
   }
 
-  const { text: licenseText, file: matchedLicenseFile } = await fetchFirstHit(owner, repo, [
-    "LICENSE",
-    "LICENSE.md",
-    "LICENSE.txt",
-    "COPYING",
-    "LICENSE-MIT",
-    "LICENSE-APACHE",
+  if (!branch) {
+    try {
+      branch = await resolveDefaultBranch(owner, repo);
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        error: `Could not determine the default branch for ${owner}/${repo}: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  const [license, readme] = await Promise.all([
+    fetchFirstHit(owner, repo, branch, [
+      "LICENSE",
+      "LICENSE.md",
+      "LICENSE.txt",
+      "COPYING",
+      "LICENSE-MIT",
+      "LICENSE-APACHE",
+    ]),
+    fetchFirstHit(owner, repo, branch, ["README.md", "README", "readme.md", "Readme.md"]),
   ]);
-  const { text: readmeText, file: matchedReadmeFile } = await fetchFirstHit(owner, repo, [
-    "README.md",
-    "README",
-    "readme.md",
-    "Readme.md",
-  ]);
+  const { text: licenseText, file: matchedLicenseFile } = license;
+  const { text: readmeText, file: matchedReadmeFile } = readme;
 
   const licenseName = licenseText ? detectLicense(licenseText) : null;
   const readmeAnalysis = analyzeReadme(readmeText);
@@ -159,10 +233,14 @@ async function validateRepository(ownerOrUrl: string, repoName: string | null = 
   };
 }
 
-async function fetchFirstHit(owner: string, repo: string, filenames: string[]) {
+async function fetchFirstHit(owner: string, repo: string, branch: string, filenames: string[]) {
   for (const fn of filenames) {
-    const text = await fetchRawFile(owner, repo, fn);
-    if (text) return { text, file: fn };
+    try {
+      const text = await fetchRawFile(owner, repo, fn, branch);
+      if (text) return { text, file: fn };
+    } catch {
+      // Missing alternate filenames are normal while checking optional files.
+    }
   }
   return { text: null, file: null };
 }
@@ -251,6 +329,7 @@ function formatValidationReport(result: ValidationResult | null) {
 export = {
   parseGithubUrl,
   validateRepository,
+  resolveDefaultBranch,
   formatValidationReport,
   detectLicense,
   analyzeReadme,

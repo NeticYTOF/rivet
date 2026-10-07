@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const knowledge = require("./knowledge");
 const programs = require("./programs");
 const db = require("./db");
+const answerCache = require("./cache");
 
 db.open(":memory:");
 
@@ -120,6 +121,179 @@ test("source eligibility uses the last successful copy and keeps dynamic copies 
   const result = knowledge.sourceEligibility(dynamic);
   assert.equal(result.authority, "dynamic");
   assert.equal(result.exactClaimsAllowed, false);
+});
+
+test("a changed program source clears only that program's cached answers", async () => {
+  const source = (content: string) => ({
+    id: "program-refresh-cache",
+    name: "Refresh Cache",
+    sharedSources: false,
+    sources: [{ name: "Inline docs", type: "text", content }],
+  });
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const question = "how many sample devices?";
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([source("There is 1 sample device.")]);
+  programs.invalidate();
+  answerCache.put(question, { source: "Inline docs", answer: "1 sample device." }, undefined, "program-refresh-cache");
+  answerCache.put(question, { source: "Other Docs", answer: "Other answer." }, undefined, "other-program");
+  try {
+    process.env.RIVET_PROGRAMS_JSON = JSON.stringify([source("There are 2 sample devices.")]);
+    programs.invalidate();
+    const refresh = knowledge.refreshProgramSources("program-refresh-cache", { force: true });
+    assert.equal(refresh.started, true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(answerCache.get(question, "program-refresh-cache"), null);
+    assert.equal(answerCache.get(question, "other-program")?.answer, "Other answer.");
+  } finally {
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    programs.invalidate();
+  }
+});
+
+test("a changed shared source clears cached answers for every program that inherits it", async () => {
+  const sourceGuard = require("./sourceGuard");
+  const originalFetch = sourceGuard.fetchSourceUrl;
+  const source = { name: "Shared refresh", type: "gdoc", url: "https://example.invalid/shared" };
+  const sourceKey = knowledge.sourceCacheKey(source);
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const question = "what does the shared guide say?";
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "shared", sources: [source] },
+    { id: "shared-consumer-a", sharedSources: true },
+    { id: "shared-consumer-b", sharedSources: true },
+    { id: "shared-opt-out", sharedSources: false },
+  ]);
+  programs.invalidate();
+  knowledge.invalidate();
+  db.saveSourceText(sourceKey, "old shared source");
+  answerCache.put(question, { source: source.name, answer: "old shared answer" }, undefined, "shared-consumer-a");
+  answerCache.put(question, { source: source.name, answer: "old shared answer" }, undefined, "shared-consumer-b");
+  answerCache.put(question, { source: source.name, answer: "unrelated answer" }, undefined, "shared-opt-out");
+  sourceGuard.fetchSourceUrl = async () => ({ data: "updated shared source" });
+
+  try {
+    const refresh = knowledge.refreshProgramSources("shared-consumer-a", { force: true });
+    assert.equal(refresh.started, true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(answerCache.get(question, "shared-consumer-a"), null);
+    assert.equal(answerCache.get(question, "shared-consumer-b"), null);
+    assert.equal(answerCache.get(question, "shared-opt-out")?.answer, "unrelated answer");
+  } finally {
+    sourceGuard.fetchSourceUrl = originalFetch;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
+});
+
+test("source removal clears cached answers even when only the persisted source cache remains", async () => {
+  const oldSource = { name: "Removed Docs", type: "url", url: "https://example.invalid/removed" };
+  const currentSource = { name: "Current Docs", type: "text", content: "Current source text." };
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const oldKey = knowledge.sourceCacheKey(oldSource);
+  const currentKey = knowledge.sourceCacheKey(currentSource);
+  db.saveSourceText(oldKey, "Removed source text.");
+  db.saveSourceText(currentKey, "Current source text.");
+  const question = "what did removed docs say?";
+  answerCache.put(
+    question,
+    { source: oldSource.name, answer: "obsolete cached answer" },
+    undefined,
+    "removed-source-program",
+  );
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "removed-source-program", sources: [currentSource], sharedSources: false },
+  ]);
+  programs.invalidate();
+  try {
+    await knowledge.refreshCorpus(true);
+    assert.equal(answerCache.get(question, "removed-source-program"), null);
+    assert.equal(db.loadSourceText(oldKey), null);
+  } finally {
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    programs.invalidate();
+  }
+});
+
+test("refresh preserves a legacy bare-name source cache alias while that source is active", async () => {
+  const source = { name: "Legacy Docs", type: "url", url: "https://example.invalid/legacy" };
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  const sourceGuard = require("./sourceGuard");
+  const originalFetch = sourceGuard.fetchSourceUrl;
+  db.saveSourceText(source.name, "Last-known-good legacy source.");
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "legacy-cache-program", sources: [source], sharedSources: false },
+  ]);
+  programs.invalidate();
+  sourceGuard.fetchSourceUrl = async () => {
+    throw new Error("offline");
+  };
+  try {
+    await knowledge.refreshCorpus(true);
+    assert.equal(db.loadSourceText(source.name)?.text, "Last-known-good legacy source.");
+    assert.match(knowledge.getCorpus("legacy-cache-program"), /Last-known-good legacy source/);
+  } finally {
+    sourceGuard.fetchSourceUrl = originalFetch;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    programs.invalidate();
+  }
+});
+
+test("a restored dynamic source is not exact-claim fresh before this boot refreshes it", () => {
+  const dynamic = { name: "Boot dynamic", type: "url", url: "https://example.invalid/boot", dynamic: true };
+  const key = knowledge.sourceCacheKey(dynamic);
+  db.saveSourceText(key, "persisted status");
+  assert.equal(knowledge.sourceEligibility(dynamic).exactClaimsAllowed, false);
+});
+
+test("lazy disk restoration of dynamic context does not make it exact-claim fresh", () => {
+  const saved = process.env.RIVET_PROGRAMS_JSON;
+  const source = { name: "Lazy dynamic", type: "url", url: "https://example.invalid/lazy", dynamic: true };
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([{ id: "lazy-prog", name: "Lazy", sources: [source] }]);
+  programs.invalidate();
+  knowledge.invalidate();
+  db.saveSourceText(knowledge.sourceCacheKey(source), "A dynamically changing exact value is 17.");
+  try {
+    assert.match(knowledge.getContext("what is the exact value", "lazy-prog"), /exact value is 17/);
+    assert.equal(knowledge.sourceEligibility(source).exactClaimsAllowed, false);
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = saved;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
+});
+
+test("refreshSource reports failures while retaining last-good source text", async () => {
+  const source = { name: "Failed refresh", type: "unsupported", url: "https://example.invalid/fail" };
+  const key = knowledge.sourceCacheKey(source);
+  db.saveSourceText(key, "last good");
+  const outcome = await knowledge.refreshSource(source, true);
+  assert.equal(outcome.success, false);
+  assert.equal(db.loadSourceText(key).text, "last good");
+});
+
+test("refreshCorpus keeps answer cache when every source body is unchanged", async () => {
+  const saved = process.env.RIVET_PROGRAMS_JSON;
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "unchanged", name: "Unchanged", sources: [{ name: "Stable body", type: "text", content: "same text" }] },
+  ]);
+  programs.invalidate();
+  try {
+    await knowledge.refreshCorpus(true);
+    answerCache.put("cache survives refresh", { source: "Stable body", answer: "still valid" });
+    await knowledge.refreshCorpus(true);
+    assert.equal(answerCache.get("cache survives refresh").answer, "still valid");
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = saved;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
 });
 
 test("operator sources load from configured programs", async () => {

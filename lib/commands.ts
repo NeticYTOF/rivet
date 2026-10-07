@@ -85,6 +85,7 @@ const lookupAnswer = (
   context: string,
   program: Program | null,
   channel?: string | null,
+  options?: { isPing?: boolean; skipCache?: boolean },
 ): Promise<{ answer: string; source?: string } | null> =>
   (
     respond.lookupAnswer as (
@@ -92,8 +93,9 @@ const lookupAnswer = (
       c: string,
       p: Program | null,
       ch?: string | null,
+      opts?: { isPing?: boolean; skipCache?: boolean },
     ) => Promise<{ answer: string; source?: string } | null>
-  )(question, context, program, channel);
+  )(question, context, program, channel, options);
 const recordGap = (
   question: string,
   userId?: string | null,
@@ -222,7 +224,7 @@ async function askCommand({ command, ack, respond: sendEphemeral }: CommandArgs)
 
   const question = (command.text || "").trim();
   if (/^help(?:\s|$)/i.test(question)) {
-    const program = programs.forChannel(command.channel_id as string);
+    const program = programs.forChannel(command.channel_id as string, command.team_id || null);
     await sendEphemeral({
       response_type: "ephemeral",
       text: formatHelp({ actorId: command.user_id as string, program }),
@@ -239,8 +241,12 @@ async function askCommand({ command, ack, respond: sendEphemeral }: CommandArgs)
 
   const askPolicy = require("./channelPolicy").resolve(command.channel_id, command.team_id || null);
   const askProgram = askPolicy.role === "none" ? null : askPolicy.program;
+  const requireGrounded =
+    process.env.RIVET_REQUIRE_GROUNDED_ANSWER === "1" || Boolean(askProgram?.requireGroundedAnswer);
   try {
-    const result = askProgram ? await lookupAnswer(question, "", askProgram, command.channel_id as string) : null;
+    const result = askProgram
+      ? await lookupAnswer(question, "", askProgram, command.channel_id as string, { skipCache: requireGrounded })
+      : null;
     if (result) {
       await sendEphemeral({
         response_type: "ephemeral",
@@ -251,8 +257,16 @@ async function askCommand({ command, ack, respond: sendEphemeral }: CommandArgs)
     }
 
     if (askProgram) recordGap(question, command.user_id as string, command.channel_id as string, null, askProgram.id);
+    if (requireGrounded) {
+      await sendEphemeral({ response_type: "ephemeral", text: respond.MENTION_FALLBACK });
+      db.recordMetric("fallback");
+      return;
+    }
     const { getChatReply } = require("./chat");
-    const chatReply = await getChatReply(question, "", command.channel_id === config.slack.helpChannel);
+    const groundedPolicy = askProgram
+      ? require("./answer").programGuardrail(askProgram, askPolicy.role === "help")
+      : "";
+    const chatReply = await getChatReply(question, groundedPolicy, askPolicy.role === "help");
     await sendEphemeral({ response_type: "ephemeral", text: chatReply || respond.MENTION_FALLBACK });
     db.recordMetric(chatReply ? "answer_chat" : "fallback");
   } catch (e: unknown) {

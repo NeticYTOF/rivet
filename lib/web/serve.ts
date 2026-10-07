@@ -104,30 +104,49 @@ function broadcastSSE(event: string, data: unknown): void {
 
 function sseStream(req: Request): Response {
   let closed = false;
+  let subscribedClient: SseClient | null = null;
+  let abortListener: (() => void) | null = null;
+  const unsubscribe = () => {
+    if (closed) return;
+    closed = true;
+    if (subscribedClient) sseClients.delete(subscribedClient);
+    if (abortListener) req.signal.removeEventListener("abort", abortListener);
+  };
   const body = new ReadableStream({
     start(controller) {
+      const streamController = controller;
       const encoder = new TextEncoder();
       const client = {
         write(data: string): void {
-          if (!closed) controller.enqueue(encoder.encode(data));
+          if (closed) return;
+          try {
+            streamController.enqueue(encoder.encode(data));
+          } catch {
+            unsubscribe();
+          }
         },
       };
+      subscribedClient = client;
       sseClients.add(client);
 
-      controller.enqueue(encoder.encode("event: connected\ndata: {}\n\n"));
-
-      req.signal.addEventListener("abort", () => {
-        closed = true;
-        sseClients.delete(client);
+      const onAbort = () => {
+        unsubscribe();
         try {
-          controller.close();
+          streamController.close();
         } catch (e) {
           log.debug("web/serve", `SSE close failed: ${e instanceof Error ? e.message : String(e)}`);
         }
-      });
+      };
+      abortListener = onAbort;
+      if (req.signal.aborted) {
+        onAbort();
+        return;
+      }
+      req.signal.addEventListener("abort", onAbort, { once: true });
+      controller.enqueue(encoder.encode("event: connected\ndata: {}\n\n"));
     },
     cancel() {
-      closed = true;
+      unsubscribe();
     },
   });
 
@@ -1095,4 +1114,4 @@ function start() {
   return server;
 }
 
-export = { start, broadcastSSE, handleRequest };
+export = { start, broadcastSSE, handleRequest, sseStream, sseClientCount: () => sseClients.size };

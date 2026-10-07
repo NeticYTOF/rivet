@@ -29,6 +29,34 @@ before(() => {
   db.open(":memory:");
 });
 
+test("overlapping cold Slack profile batches share one user.info lookup", async () => {
+  let calls = 0;
+  let release: (() => void) | null = null;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  api.setSlackClient({
+    users: {
+      info: async ({ user }: UserInfoRequest) => {
+        calls += 1;
+        await barrier;
+        return { user: { id: user, name: "single-flight", profile: {} } };
+      },
+    },
+  } as any);
+  try {
+    const first = api.internalUserInfoBatch(["U-COLD-SINGLE-FLIGHT"]);
+    const second = api.internalUserInfoBatch(["U-COLD-SINGLE-FLIGHT"]);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(calls, 1);
+    release?.();
+    await Promise.all([first, second]);
+  } finally {
+    api.setSlackClient(null as any);
+  }
+});
+
 test("manual incident creation is helper-gated and tenant-scoped", () => {
   api.internalProgramSync("manual-a", {
     name: "Manual A",

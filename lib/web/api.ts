@@ -1960,6 +1960,26 @@ const SLACK_CHANNELS_FAILURE_TTL_MS = 60 * 1000;
 const userInfoCache = new Map<string, UserInfo>();
 const USER_INFO_TTL_MS = 60 * 60 * 1000;
 const USER_INFO_MISS_TTL_MS = 5 * 60 * 1000;
+const USER_INFO_CONCURRENCY = 5;
+const userInfoInFlight = new Map<string, Promise<ApiResponse>>();
+let activeUserInfoRequests = 0;
+const waitingForUserInfoSlot: Array<() => void> = [];
+
+async function acquireUserInfoSlot(): Promise<() => void> {
+  if (activeUserInfoRequests < USER_INFO_CONCURRENCY) {
+    activeUserInfoRequests += 1;
+  } else {
+    await new Promise<void>((resolve) => waitingForUserInfoSlot.push(resolve));
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = waitingForUserInfoSlot.shift();
+    if (next) next();
+    else activeUserInfoRequests -= 1;
+  };
+}
 
 function cachedUserInfo(userId: string): UserInfo | null {
   const hit = userInfoCache.get(userId);
@@ -1984,24 +2004,37 @@ async function internalUserInfo(userId: string): Promise<ApiResponse> {
         }
       : { ok: false, slackId: userId, reason: cached.reason };
   }
-  const token = config.slack.botToken;
-  if (!token && !slackClient) return { ok: false, slackId: userId, reason: "slack not connected" };
+  const inFlight = userInfoInFlight.get(userId);
+  if (inFlight) return inFlight;
+  const run = (async () => {
+    const token = config.slack.botToken;
+    if (!token && !slackClient) return { ok: false, slackId: userId, reason: "slack not connected" };
+    const releaseSlot = await acquireUserInfoSlot();
+    try {
+      const client = slackClient || new (require("@slack/web-api").WebClient)(token);
+      const res = await client.users.info({ user: userId });
+      const u = res.user || {};
+      const profile = u.profile || {};
+      const displayName = profile.display_name || profile.real_name || u.name || null;
+      const realName = profile.real_name || u.real_name || null;
+      const username = u.name || null;
+      const avatarUrl = profile.image_192 || profile.image_72 || null;
+      userInfoCache.set(userId, { at: Date.now(), ok: true, displayName, realName, username, avatarUrl });
+      return { ok: true, slackId: userId, displayName, realName, username, avatarUrl };
+    } catch (e) {
+      const error = e as SlackError;
+      const reason = (error && error.message) || "lookup failed";
+      userInfoCache.set(userId, { at: Date.now(), ok: false, reason });
+      return { ok: false, slackId: userId, reason };
+    } finally {
+      releaseSlot();
+    }
+  })();
+  userInfoInFlight.set(userId, run);
   try {
-    const client = slackClient || new (require("@slack/web-api").WebClient)(token);
-    const res = await client.users.info({ user: userId });
-    const u = res.user || {};
-    const profile = u.profile || {};
-    const displayName = profile.display_name || profile.real_name || u.name || null;
-    const realName = profile.real_name || u.real_name || null;
-    const username = u.name || null;
-    const avatarUrl = profile.image_192 || profile.image_72 || null;
-    userInfoCache.set(userId, { at: Date.now(), ok: true, displayName, realName, username, avatarUrl });
-    return { ok: true, slackId: userId, displayName, realName, username, avatarUrl };
-  } catch (e) {
-    const error = e as SlackError;
-    const reason = (error && error.message) || "lookup failed";
-    userInfoCache.set(userId, { at: Date.now(), ok: false, reason });
-    return { ok: false, slackId: userId, reason };
+    return await run;
+  } finally {
+    if (userInfoInFlight.get(userId) === run) userInfoInFlight.delete(userId);
   }
 }
 

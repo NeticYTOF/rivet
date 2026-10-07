@@ -66,6 +66,16 @@ function cacheHit(question: string, contextPrompt: string, programId: string | n
   if (contextPrompt || skipCache) return null;
   const hit = cache.get(question, programId);
   if (!hit) return null;
+  const citedSource = programSources(programId).find(
+    (source) =>
+      source?.dynamic === true &&
+      (source.name?.trim().toLowerCase() === hit.source?.trim().toLowerCase() ||
+        knowledge.sourceContainsCitation(source, hit.source || "")),
+  );
+  if (citedSource && !knowledge.sourceEligibility(citedSource).exactClaimsAllowed) {
+    log.debug("grounding", `bypassing cache entry from stale dynamic source "${citedSource.name}"`);
+    return null;
+  }
   log.debug("respond", "cache hit");
   db.recordMetric("cache_hit");
   return hit;

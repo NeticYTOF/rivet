@@ -143,6 +143,37 @@ test("non-free models are refused before any I/O with errorKind config", async (
   assert.equal(calls, 0);
 });
 
+test("decision cache stays bounded when each conversation has a new key", async () => {
+  jev.clearDecisionCache();
+  const originalInfo = log.info;
+  log.info = () => {};
+  try {
+    for (let index = 0; index < jev.MAX_CACHE_ENTRIES + 2; index += 1) {
+      await jev.evaluateSupportDecision(input(`unique question ${index}?`), {
+        config: CFG,
+        httpPost: async () => ({
+          status: 200,
+          data: {
+            model: CFG.model,
+            answers: {
+              intent: {
+                type: "choice",
+                choice: "support_question",
+                probabilities: { support_question: 0.9 },
+              },
+              shouldEngage: { type: "noul", noul: 0.9 },
+            },
+          },
+        }),
+      });
+    }
+  } finally {
+    log.info = originalInfo;
+  }
+  assert.ok(jev.getStats().cacheSize <= jev.MAX_CACHE_ENTRIES);
+  assert.equal(jev.getStats().cacheSize, jev.MAX_CACHE_ENTRIES);
+});
+
 test("timeout maps to error/timeout", async () => {
   const timeoutErr = Object.assign(new Error("timeout of 8000ms exceeded"), { code: "ECONNABORTED" });
   const res = await jev.evaluateSupportDecision(input("what is acme?"), {

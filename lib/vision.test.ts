@@ -25,6 +25,52 @@ test("system prompt answers instead of describing, and allows skipping", () => {
   assert.doesNotMatch(bare, /Conversation so far:|Docs:/);
 });
 
+test("grounded image policy requires a verbatim docs proof for program facts", () => {
+  assert.equal(vision.isGroundedImageReply("The deadline is Friday.", "when is the deadline?", ""), false);
+  assert.equal(
+    vision.isGroundedImageReply("Use the Launchpad rubric.", "what rubric?", "The Launchpad rubric has five criteria."),
+    false,
+  );
+  assert.equal(
+    vision.isGroundedImageReply(
+      'DOC_SUPPORT: "The Launchpad rubric has five criteria."\nANSWER: Use the Launchpad rubric.',
+      "what rubric?",
+      "The Launchpad rubric has five criteria.",
+    ),
+    true,
+  );
+  assert.equal(
+    vision.groundedImageReply(
+      'DOC_SUPPORT: "The Launchpad rubric has five criteria."\nANSWER: Actually, it has eight.',
+      "what rubric?",
+      "The Launchpad rubric has five criteria.",
+    ),
+    "The Launchpad rubric has five criteria.",
+    "the sent factual text is the verbatim supported source sentence",
+  );
+});
+
+test("grounded image policy permits clear coding help but does not treat any error word as coding", () => {
+  assert.equal(
+    vision.isGroundedImageReply(
+      "Use the shown variable before it is assigned.",
+      "Why does this TypeScript compiler error happen?",
+      "",
+    ),
+    true,
+  );
+  assert.equal(
+    vision.isGroundedImageReply("The error is that the deadline passed.", "what error says the deadline?", ""),
+    false,
+  );
+});
+
+test("grounded image prompt preserves general coding help", () => {
+  const prompt = vision.visionSystemPrompt("", "", true);
+  assert.match(prompt, /General code debugging based on the image remains allowed/);
+  assert.match(prompt, /reply exactly SKIP/);
+});
+
 test("a SKIP reply means say nothing", async () => {
   for (const content of ["SKIP", "skip.", " SKIP! "]) {
     axios.post = async () => ({ data: { choices: [{ message: { content } }] } });

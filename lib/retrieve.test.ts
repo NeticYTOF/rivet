@@ -90,7 +90,7 @@ test("selectChunks respects the character budget", () => {
   assert.ok(total <= 300, `selected ${total} chars against a 300 budget`);
 });
 
-test("selectChunks stops at the first chunk that doesn't fit, instead of skipping ahead to a smaller lower-ranked one", () => {
+test("selectChunks skips an oversized chunk and continues to smaller ranked evidence", () => {
   const BIG = "gizmo ".repeat(40) + "widget contraption apparatus mechanism instrument.";
   const SMALL = "gizmo mentioned once, short.";
 
@@ -109,7 +109,18 @@ test("selectChunks stops at the first chunk that doesn't fit, instead of skippin
   const budget = second.chunk.text.length + 5;
   assert.ok(budget < top.chunk.text.length, "test setup: top chunk must not fit in the budget");
 
-  assert.deepEqual(retrieve.selectChunks(localIndex, "gizmo", budget), []);
+  assert.equal(retrieve.selectChunks(localIndex, "gizmo", budget).length, 1);
+});
+
+test("selectContext can require a matching evidence chunk", () => {
+  const context = retrieve.selectContext({
+    generated: [],
+    index,
+    sources: SOURCES,
+    question: "zzzz qqqq",
+    requireEvidence: true,
+  });
+  assert.equal(context, "");
 });
 
 const GENERATED = [

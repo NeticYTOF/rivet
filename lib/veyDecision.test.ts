@@ -99,6 +99,26 @@ test("chatter is silenced rather than engaged", async () => {
   assert.equal(res.reason, "vey_chatter");
   assert.equal(res.shouldEngageP, 0);
 });
+
+test("decision cache stays bounded when each conversation has a new key", async () => {
+  vey.clearDecisionCache();
+  const log = require("./log");
+  const originalInfo = log.info;
+  const originalFetch = globalThis.fetch;
+  const fakeFetch = verdict("support_question", true);
+  globalThis.fetch = fakeFetch as unknown as typeof globalThis.fetch;
+  log.info = () => {};
+  try {
+    for (let index = 0; index < vey.MAX_CACHE_ENTRIES + 2; index += 1) {
+      await vey.evaluateSupportDecision(input(`unique question ${index}?`), { config: CFG });
+    }
+  } finally {
+    log.info = originalInfo;
+    globalThis.fetch = originalFetch;
+  }
+  assert.ok(vey.getStats().cacheSize <= vey.MAX_CACHE_ENTRIES);
+  assert.equal(vey.getStats().cacheSize, vey.MAX_CACHE_ENTRIES);
+});
 test("an addressed general request engages whether or not should_engage agrees", async () => {
   const engaged = await decide("tell me a joke", verdict("addressed_general_request", true), { addressed: true });
   const denied = await decide("tell me a joke", verdict("addressed_general_request", false), { addressed: true });

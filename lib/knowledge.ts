@@ -80,6 +80,11 @@ const UNRENDERED_PLACEHOLDER_RE = /\{\{[a-z0-9_]+\}\}/i;
 const MAX_SOURCE_TEXT_CHARS = 200000;
 
 const inflightSources = new Set<string>();
+const sourceRefreshes = new Map<string, Promise<{ success: boolean; changed: boolean }>>();
+const refreshedDynamicThisBoot = new Set<string>();
+let activeSourceRefreshes = 0;
+const sourceRefreshWaiters: Array<() => void> = [];
+const MAX_CONCURRENT_SOURCE_REFRESHES = 4;
 const cache = new Map<string, string>();
 const linkCache = new Map<string, string>();
 let lastBuiltAt: Date | null = null;
@@ -427,7 +432,18 @@ function sourceFreshness(source: SourceRecord) {
   const lastSuccessAt = row?.last_success_at || null;
   const failCount = Number(row?.fail_count || 0);
   const hasLastGood = Boolean(lastSuccessAt) || cache.has(memKey(source));
-  const freshness = !hasLastGood ? "unavailable" : failCount > 0 ? "stale" : "fresh";
+  const refreshedThisBoot = refreshedDynamicThisBoot.has(key);
+  const freshness = isDynamicSource(source)
+    ? refreshedThisBoot
+      ? "fresh"
+      : hasLastGood || failCount > 0
+        ? "stale"
+        : "unavailable"
+    : !hasLastGood
+      ? "unavailable"
+      : failCount > 0
+        ? "stale"
+        : "fresh";
 
   return {
     key,
@@ -732,28 +748,32 @@ function persistSourceText(source: SourceRecord, text: string) {
         db.handle().query("DELETE FROM source_cache WHERE name = ?").run(source.name);
       } catch (_error: unknown) {}
     }
+    return true;
   } catch (error: unknown) {
     log.warn(
       "knowledge",
       `could not persist "${source.name}": ${error instanceof Error ? error.message : String(error)}`,
     );
+    return false;
   }
 }
 
 async function refreshSource(source: SourceRecord, force = false) {
   try {
     const text = await fetchSourceText(source, force);
-    if (!text) return;
+    if (!text) throw new Error("source returned no content");
     const capped = text.length > MAX_SOURCE_TEXT_CHARS ? text.slice(0, MAX_SOURCE_TEXT_CHARS) : text;
     if (capped.length !== text.length) {
       log.warn("knowledge", `truncated oversized body for "${source.name}" (${text.length} chars)`);
     }
+    const previous =
+      cache.get(memKey(source)) || db.loadSourceText(sourceCacheKey(source) || source.name)?.text || null;
+    if (!persistSourceText(source, capped)) throw new Error("source cache persistence failed");
     cache.set(memKey(source), capped);
-    persistSourceText(source, capped);
-    corpusCacheMap.clear();
-    corpusBuiltOnMap.clear();
-    retrievalIndexMap.clear();
-    sourceSectionsCacheMap.clear();
+    if (isDynamicSource(source)) refreshedDynamicThisBoot.add(sourceCacheKey(source));
+    const changed = previous !== capped;
+    if (changed) invalidate();
+    return { success: true, changed };
   } catch (error: unknown) {
     const restored = cache.has(memKey(source)) || restoreFromDisk(source);
     const tail = restored ? "serving last good copy" : "and there is no stored copy to fall back on";
@@ -775,6 +795,7 @@ async function refreshSource(source: SourceRecord, force = false) {
         }
       } catch (_error: unknown) {}
     }
+    return { success: false, changed: false };
   }
 }
 
@@ -796,6 +817,15 @@ function faqQuestions(programId: string | null = null): string[] {
     }
   }
   return questions;
+}
+
+function faqEntries() {
+  const entries: { question: string; programId: string | null }[] = [];
+  for (const program of programs.all()) {
+    for (const question of faqQuestions(program.id)) entries.push({ question, programId: program.id });
+  }
+  for (const question of faqQuestions()) entries.push({ question, programId: null });
+  return entries;
 }
 
 function generatedSections(programId: string | null = null, question: string | null = null): Section[] {
@@ -951,6 +981,7 @@ function selectContextFor(question: string, programId: string | null) {
     sources: sourceSections(programId),
     question,
     exclude: null,
+    requireEvidence: true,
   });
 
   const fullCorpus = getCorpus(programId);
@@ -1043,14 +1074,48 @@ function sourceStatus(programId: string | null) {
 
 async function refreshSourceTracked(source: SourceRecord, force: boolean) {
   const key = memKey(source);
-  if (inflightSources.has(key)) return;
+  const existing = sourceRefreshes.get(key);
+  if (existing) return existing;
   inflightSources.add(key);
-  try {
-    await refreshSource(source, force);
-  } finally {
-    inflightSources.delete(key);
-    invalidate();
+  const task = (async () => {
+    if (activeSourceRefreshes >= MAX_CONCURRENT_SOURCE_REFRESHES) {
+      await new Promise<void>((resolve) => sourceRefreshWaiters.push(resolve));
+    } else {
+      activeSourceRefreshes += 1;
+    }
+    try {
+      const result = await refreshSource(source, force);
+      if (result.changed) {
+        invalidate();
+        invalidateAnswersForSource(source);
+      }
+      return result;
+    } finally {
+      const next = sourceRefreshWaiters.shift();
+      if (next) next();
+      else activeSourceRefreshes -= 1;
+      inflightSources.delete(key);
+      sourceRefreshes.delete(key);
+    }
+  })();
+  sourceRefreshes.set(key, task);
+  return task;
+}
+
+function invalidateAnswersForSource(source: SourceRecord) {
+  const targetKey = memKey(source);
+  const shared = programs.shared();
+  const sharedSources = shared.sources || [];
+  const sharedChanged = sharedSources.some((candidate: SourceRecord) => memKey(candidate) === targetKey);
+  const affected = new Set<string>();
+  if (sharedChanged) affected.add(shared.id);
+  for (const program of programs.all()) {
+    const sources = [...(program.sources || []), ...(program.sharedSources === false ? [] : sharedSources)];
+    if (sources.some((candidate: SourceRecord) => memKey(candidate) === targetKey)) affected.add(program.id);
   }
+  for (const programId of affected) answerCache.clearProgramCache(programId);
+  if (sharedChanged) answerCache.clearProgramCache(null);
+  return affected.size + (sharedChanged ? 1 : 0);
 }
 
 function refreshProgramSources(programId: string | null, { force = false }: { force?: boolean } = {}) {
@@ -1065,25 +1130,44 @@ function refreshProgramSources(programId: string | null, { force = false }: { fo
     launched += 1;
     void refreshSourceTracked(source, force);
   }
-  try {
-    answerCache.clearCache();
-  } catch (_error: unknown) {}
   return { started: true, sources: launched };
 }
 
 async function refreshCorpus(force = false) {
   const sources = loadSources();
   const validKeys = new Set(sources.map((s) => memKey(s)));
+  const validPersistedKeys = new Set([...validKeys, ...sources.map((source) => source.name)]);
+  const persistedKeys = db.handle().query("SELECT name FROM source_cache").all() as Array<{ name: string }>;
+  const removedKeys = persistedKeys.map((row) => row.name).filter((key) => !validPersistedKeys.has(key));
+  let removedSourceText = removedKeys.length > 0;
+  for (const key of removedKeys) db.handle().query("DELETE FROM source_cache WHERE name = ?").run(key);
   for (const key of cache.keys()) {
-    if (!validKeys.has(key)) cache.delete(key);
+    if (!validKeys.has(key)) {
+      cache.delete(key);
+      removedSourceText = true;
+    }
   }
-  await Promise.all(sources.map((source) => refreshSource(source, force)));
-  invalidate();
-  try {
-    answerCache.clearCache();
-    log.info("knowledge", "answer cache cleared after corpus refresh");
-  } catch (error: unknown) {
-    log.warn("knowledge", `failed to clear answer cache: ${error instanceof Error ? error.message : String(error)}`);
+  const results = await Promise.all(sources.map((source) => refreshSourceTracked(source, force)));
+  const changed = results.some((result) => result.changed);
+  if (changed) {
+    try {
+      log.info("knowledge", "answer caches invalidated for programs with changed sources");
+    } catch (error: unknown) {
+      log.warn("knowledge", `failed to clear answer cache: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (removedSourceText) {
+    // Once a source definition is removed its program ownership is no longer
+    // available to scope invalidation. Clear old answers so they cannot keep
+    // citing content that is no longer in an active corpus.
+    try {
+      answerCache.clearCache();
+    } catch (error: unknown) {
+      log.warn(
+        "knowledge",
+        `failed to clear answer cache for removed sources: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
   lastBuiltAt = new Date();
   log.info("knowledge", `corpus refreshed — ${cache.size}/${sources.length} sources loaded`);
@@ -1121,6 +1205,7 @@ export = {
   getCorpus,
   getContext,
   faqQuestions,
+  faqEntries,
   getIndex,
   sourceStatus,
   refreshProgramSources,
