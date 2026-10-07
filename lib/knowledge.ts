@@ -87,6 +87,7 @@ let lastBuiltAt: Date | null = null;
 const corpusCacheMap = new Map<string, string>();
 const corpusBuiltOnMap = new Map<string, string>();
 const retrievalIndexMap = new Map<string, RetrievalIndex>();
+const sourceSectionsCacheMap = new Map<string, Section[]>();
 const draftCorpusMap = new Map<string, string>();
 const draftIndexMap = new Map<string, { docs: unknown[] }>();
 
@@ -98,6 +99,7 @@ function invalidate() {
   corpusCacheMap.clear();
   corpusBuiltOnMap.clear();
   retrievalIndexMap.clear();
+  sourceSectionsCacheMap.clear();
   draftCorpusMap.clear();
   draftIndexMap.clear();
 }
@@ -746,6 +748,10 @@ async function refreshSource(source: SourceRecord, force = false) {
     }
     cache.set(memKey(source), capped);
     persistSourceText(source, capped);
+    corpusCacheMap.clear();
+    corpusBuiltOnMap.clear();
+    retrievalIndexMap.clear();
+    sourceSectionsCacheMap.clear();
   } catch (error: unknown) {
     const restored = cache.has(memKey(source)) || restoreFromDisk(source);
     const tail = restored ? "serving last good copy" : "and there is no stored copy to fall back on";
@@ -848,6 +854,10 @@ function memText(source: SourceRecord) {
 }
 
 function sourceSections(programId: string | null = null): Section[] {
+  const key = programId || "shared";
+  const cached = sourceSectionsCacheMap.get(key);
+  if (cached) return cached;
+
   const prog = programs.get(programId);
   const progSources = prog ? prog.sources || [] : [];
   const sharedSources = prog && prog.sharedSources === false ? [] : programs.shared().sources || [];
@@ -863,6 +873,7 @@ function sourceSections(programId: string | null = null): Section[] {
     if (text) result.push([src.name, text]);
   }
 
+  sourceSectionsCacheMap.set(key, result);
   return result;
 }
 
