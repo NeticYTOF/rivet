@@ -622,11 +622,13 @@ async function respond({
   }
 
   const isSlackRootMessage = Boolean(messageTs && messageTs === threadTs);
+  const contextStartedAt = Date.now();
   if (seedClient && threadTs && !isSlackRootMessage) {
     await context.seedFromSlack(seedClient, channel, threadTs, config.slack.botUserId, messageTs || threadTs);
   }
 
   const threadContext = context.getThreadContext(threadTs, trimmed);
+  trace.set({ contextMs: Date.now() - contextStartedAt });
 
   context.addToThread(threadTs, "user", trimmed, userId, channel);
 
@@ -663,6 +665,12 @@ async function respond({
     return true;
   }
 
+  const prefetchedUrl =
+    isAddressed && settings?.generalMentionChat !== false ? link.extractUrl(trimmed) : null;
+  const linkStartedAt = prefetchedUrl ? Date.now() : null;
+  const prefetchedLink = prefetchedUrl ? link.fetchUrlContent(prefetchedUrl) : null;
+
+  const classifyStartedAt = Date.now();
   const engaged = await engagement.classify({
     message: effectiveQuestion,
     threadContext,
@@ -674,6 +682,7 @@ async function respond({
     threadMessages,
     recentMessages: await recentChannelContext({ seedClient, channel, messageTs, threadTs }),
   });
+  trace.set({ classifyMs: Date.now() - classifyStartedAt });
   trace.set({
     classifier: engaged.source,
     intent: engaged.intent,
@@ -826,9 +835,11 @@ async function respond({
 
   let hasLinkContext = false;
   if (isAddressed || plan.support) {
-    const urlStr = link.extractUrl(trimmed);
+    const urlStr = prefetchedUrl || link.extractUrl(trimmed);
     if (urlStr) {
-      const linkResult = await link.fetchUrlContent(urlStr);
+      const fetchStartedAt = linkStartedAt || Date.now();
+      const linkResult = prefetchedLink ? await prefetchedLink : await link.fetchUrlContent(urlStr);
+      trace.set({ linkMs: Date.now() - fetchStartedAt });
       if (linkResult.blocked) {
         if (placeholderTimer) clearTimeout(placeholderTimer);
         db.recordMetric("blocked_link", Date.now() - startedAt);
@@ -868,6 +879,7 @@ async function respond({
     : null;
 
   let result: AnswerResult | null = null;
+  const answerStartedAt = Date.now();
   try {
     result = await lookup.answerOrChat(effectiveQuestion, contextPrompt, {
       onText,
@@ -920,6 +932,7 @@ async function respond({
   }
 
   await streamer?.settle();
+  trace.set({ answerMs: Date.now() - answerStartedAt });
   if (firstTextMs !== null) db.recordMetric("first_token", firstTextMs);
 
   if (result?.answer) {
