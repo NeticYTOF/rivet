@@ -37,16 +37,13 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ id: 
   let a: Analytics | null = null;
   let metrics: DashboardMetrics | null = null;
   let loadError: string | null = null;
-  try {
-    a = (await coreAnalytics(id, 30)) as unknown as Analytics;
-  } catch (err) {
-    loadError = err instanceof Error ? err.message : "Analytics are unavailable.";
-  }
-  try {
-    metrics = await coreDashboardMetrics(id, 30);
-  } catch {
-    metrics = null;
-  }
+  const [analyticsResult, metricsResult] = await Promise.allSettled([
+    coreAnalytics(id, 30),
+    coreDashboardMetrics(id, 30),
+  ]);
+  if (analyticsResult.status === "fulfilled") a = analyticsResult.value as unknown as Analytics;
+  else loadError = analyticsResult.reason instanceof Error ? analyticsResult.reason.message : "Analytics are unavailable.";
+  if (metricsResult.status === "fulfilled") metrics = metricsResult.value;
 
   if (loadError || !a) {
     return (

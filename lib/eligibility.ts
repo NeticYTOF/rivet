@@ -239,6 +239,13 @@ function humanReviewRequest(text: string): boolean {
 function sensitiveHit(text: string, program: Program | null = null): boolean {
   const cats = program && Array.isArray(program.sensitiveCategories) ? program.sensitiveCategories : [];
   const body = String(text || "");
+  if (
+    /\b(?:self[- ]harm|hurt myself|harm myself|end my life|kill myself|suicid(?:e|al)|don['’]?t want to be alive|wish (?:i were|i was) dead)\b/i.test(
+      body,
+    )
+  ) {
+    return true;
+  }
   if (humanReviewRequest(body)) return true;
   if (cats.length === 0) return false;
   const lowered = body.toLowerCase();

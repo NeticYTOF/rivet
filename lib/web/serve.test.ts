@@ -127,6 +127,24 @@ test("dashboard gates — pulse/stream/ask/health need session; writes need admi
   }
 });
 
+test("cancelled SSE streams remove their subscriber immediately", async () => {
+  const serve = require("./serve");
+  const before = serve.sseClientCount();
+  const response = serve.sseStream(new Request("http://localhost/api/stream"));
+  assert.equal(serve.sseClientCount(), before + 1);
+  await response.body.cancel();
+  assert.equal(serve.sseClientCount(), before);
+});
+
+test("a request aborted before SSE stream setup never leaves a subscriber", async () => {
+  const serve = require("./serve");
+  const controller = new AbortController();
+  controller.abort();
+  const before = serve.sseClientCount();
+  serve.sseStream(new Request("http://localhost/api/stream", { signal: controller.signal }));
+  assert.equal(serve.sseClientCount(), before);
+});
+
 test("internal error→status mapping per route family (pinned current values)", async () => {
   const saved = process.env.RIVET_INTERNAL_TOKEN;
   process.env.RIVET_INTERNAL_TOKEN = "char-map-token";

@@ -159,6 +159,7 @@ function decideAction(
 const decisionCache = new Map<string, { expiresAt: number; result: SupportOutcome }>();
 const inflightEvaluations = new Map<string, Promise<SupportOutcome>>();
 const veyStats = { calls: 0, cacheHits: 0 };
+const MAX_CACHE_ENTRIES = 2048;
 
 function veyCacheTtlMs() {
   const n = Number(process.env.VEY_CACHE_TTL_MS);
@@ -180,7 +181,18 @@ function cacheKeyFor({ baseUrl, state }: { baseUrl: string; state: VeyState }): 
 }
 
 function getStats() {
-  return { ...veyStats };
+  return { ...veyStats, cacheSize: decisionCache.size };
+}
+
+function pruneDecisionCache(now = Date.now()) {
+  for (const [key, hit] of decisionCache) {
+    if (hit.expiresAt <= now) decisionCache.delete(key);
+  }
+  while (decisionCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = decisionCache.keys().next().value;
+    if (oldest === undefined) break;
+    decisionCache.delete(oldest);
+  }
 }
 
 function clearDecisionCache() {
@@ -281,6 +293,8 @@ async function evaluateSupportDecision(
   if (key) {
     const hit = decisionCache.get(key);
     if (hit && hit.expiresAt > Date.now()) {
+      decisionCache.delete(key);
+      decisionCache.set(key, hit);
       veyStats.cacheHits += 1;
       try {
         require("./db").recordMetric("vey_cache_hit", 0, hit.result.action || null, state.program?.id || null);
@@ -290,6 +304,7 @@ async function evaluateSupportDecision(
       log.info("vey", `[vey] cached=true action=${hit.result.action} reason=${hit.result.reason}`);
       return { ...hit.result, latencyMs: 0, cached: true };
     }
+    if (hit) decisionCache.delete(key);
     if (inflightEvaluations.has(key)) return inflightEvaluations.get(key) as Promise<SupportOutcome>;
   }
   const run = (async () => {
@@ -315,7 +330,10 @@ async function evaluateSupportDecision(
     };
     if (key) {
       veyStats.calls += 1;
+      pruneDecisionCache();
+      decisionCache.delete(key);
       decisionCache.set(key, { expiresAt: Date.now() + veyCacheTtlMs(), result: outcome });
+      pruneDecisionCache();
     }
     return outcome;
   })();
@@ -357,4 +375,5 @@ export = {
   VEY_DECIDE_PATH,
   WIRE_VERSION,
   DEFAULT_TIMEOUT_MS,
+  MAX_CACHE_ENTRIES,
 };

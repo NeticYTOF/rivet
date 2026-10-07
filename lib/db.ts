@@ -237,6 +237,25 @@ function errorMessage(error: unknown): string {
 
 function migrate(database: DatabaseType) {
   for (const [table, column, sql] of MIGRATIONS) {
+    if (table === "answer_cache_identity_v2") {
+      const exists = database.query("SELECT name FROM sqlite_master WHERE type = ? AND name = ?").get("table", table);
+      if (!exists) {
+        database.exec("BEGIN IMMEDIATE");
+        try {
+          // Old fuzzy keys may have stored a negated or numeric answer under
+          // the new question's key. Drop those once when upgrading identity.
+          database.exec("DELETE FROM answer_cache");
+          database.exec(sql);
+          database.query("INSERT INTO answer_cache_identity_v2 (version) VALUES (2)").run();
+          database.exec("COMMIT");
+        } catch (error: unknown) {
+          database.exec("ROLLBACK");
+          throw error;
+        }
+        log.info("db", "migrated: answer_cache identity v2 (legacy entries cleared)");
+      }
+      continue;
+    }
     if (sql.startsWith("CREATE TABLE")) {
       const exists = database.query("SELECT name FROM sqlite_master WHERE type = ? AND name = ?").get("table", table);
       if (exists) continue;
@@ -790,20 +809,21 @@ function recordLlmUsage(entry: Record<string, unknown> = {}) {
   }
 }
 
-function llmUsageSummary(sinceMs = 24 * 60 * 60 * 1000) {
+function llmUsageSummary(sinceMs = 24 * 60 * 60 * 1000, untilMs = now()) {
   try {
     return query(
       `SELECT operation, program_id, channel, model,
               COUNT(*) AS requests, SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS successes,
               SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
               SUM(CASE WHEN http_status = 429 THEN 1 ELSE 0 END) AS rate_limits,
+              SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) AS unknown_cost_requests,
               SUM(retry_count) AS retries, SUM(prompt_tokens) AS prompt_tokens,
               SUM(completion_tokens) AS completion_tokens, SUM(total_tokens) AS total_tokens,
               SUM(cost_usd) AS cost_usd
-       FROM llm_usage WHERE created_at > ?
+       FROM llm_usage WHERE created_at >= ? AND created_at < ?
        GROUP BY operation, program_id, channel, model
        ORDER BY requests DESC`,
-    ).all(now() - sinceMs);
+    ).all(untilMs - Math.max(0, sinceMs), untilMs);
   } catch (e: unknown) {
     log.debug("db", `llm telemetry read failed: ${errorMessage(e)}`);
     return [];

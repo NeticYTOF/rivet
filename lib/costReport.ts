@@ -14,29 +14,53 @@ function cents(usd: number | null | undefined): number {
 }
 
 function dayKey(at = new Date()): string {
-  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+  return at.toISOString().slice(0, 10);
 }
 
 function costDigestText(rows: Array<Record<string, unknown>> = [], at = new Date()): string | null {
-  const ops: Record<string, { requests: number; inTok: number; outTok: number; usd: number }> = {};
+  const ops: Record<string, { requests: number; inTok: number; outTok: number; usd: number; unknownCost: number }> = {};
   let totalUsd = 0;
   let totalReq = 0;
+  let unknownCostRequests = 0;
+  let pricedRequests = 0;
   for (const r of rows) {
     const op = String(r.operation || "other");
-    const acc = ops[op] || (ops[op] = { requests: 0, inTok: 0, outTok: 0, usd: 0 });
-    acc.requests += Number(r.requests) || 0;
+    const acc = ops[op] || (ops[op] = { requests: 0, inTok: 0, outTok: 0, usd: 0, unknownCost: 0 });
+    const requests = Number(r.requests) || 0;
+    const knownCost = r.cost_usd === null || r.cost_usd === undefined ? null : Number(r.cost_usd);
+    acc.requests += requests;
     acc.inTok += Number(r.prompt_tokens) || 0;
     acc.outTok += Number(r.completion_tokens) || 0;
-    acc.usd += Number(r.cost_usd) || 0;
-    totalReq += Number(r.requests) || 0;
-    totalUsd += Number(r.cost_usd) || 0;
+    totalReq += requests;
+    const unknownForRow =
+      r.unknown_cost_requests === undefined
+        ? knownCost === null || !Number.isFinite(knownCost)
+          ? requests
+          : 0
+        : Math.min(requests, Math.max(0, Number(r.unknown_cost_requests) || 0));
+    acc.unknownCost += unknownForRow;
+    unknownCostRequests += unknownForRow;
+    pricedRequests += requests - unknownForRow;
+    if (knownCost !== null && Number.isFinite(knownCost)) {
+      acc.usd += knownCost;
+      totalUsd += knownCost;
+    }
   }
   if (totalReq === 0) return null;
   const parts = Object.entries(ops)
     .sort((a, b) => b[1].usd - a[1].usd)
-    .map(([op, o]) => `${op} ${o.requests} ($${(o.usd || 0).toFixed(3)})`);
+    .map(([op, o]) => {
+      const priced = o.requests - o.unknownCost;
+      return o.unknownCost > 0
+        ? `${op} ${priced} priced, ${o.unknownCost} unpriced ($${o.usd.toFixed(3)} known)`
+        : `${op} ${o.requests} ($${o.usd.toFixed(3)})`;
+    });
   const date = dayKey(at);
-  return `${brand.name()} api costs ${date}: ${parts.join(" · ")} — total $${totalUsd.toFixed(3)} (${totalReq} calls)`;
+  const totals =
+    unknownCostRequests > 0
+      ? `known subtotal $${totalUsd.toFixed(3)}; ${unknownCostRequests} calls have unknown cost (${pricedRequests}/${totalReq} priced calls)`
+      : `total $${totalUsd.toFixed(3)}`;
+  return `${brand.name()} api costs ${date}: ${parts.join(" · ")} — ${totals} (${totalReq} calls)`;
 }
 
 function lastCostReportDay(): string | null {
@@ -59,4 +83,4 @@ function isCostReportDue(at = new Date()): boolean {
   return lastCostReportDay() !== dayKey(at);
 }
 
-export = { costDigestText, lastCostReportDay, markCostReportSent, isCostReportDue, COST_METRIC, DAY_MS, cents };
+export = { costDigestText, lastCostReportDay, markCostReportSent, isCostReportDue, COST_METRIC, DAY_MS, cents, dayKey };

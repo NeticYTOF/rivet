@@ -147,6 +147,7 @@ function normalizeProgram(p: RawProgramConfig): ProgramRecord {
     helperGroup: alt(p, "helperGroup", "helper_group") || null,
     sources: Array.isArray(p.sources) ? p.sources : [],
     sharedSources: p.sharedSources === true,
+    requireGroundedAnswer: p.requireGroundedAnswer === true,
     milestones: Array.isArray(p.milestones) ? p.milestones : [],
     pinnedRules: Array.isArray(p.pinnedRules)
       ? p.pinnedRules.filter((r): r is string => typeof r === "string" && Boolean(r.trim()))
@@ -278,6 +279,32 @@ function invalidate() {
   cachedPrograms = null;
   cachedEnvRaw = null;
   cachedEnvPrograms = null;
+}
+
+function answerConfigurationKey(program: ProgramRecord | null, sharedSources: ProgramSource[] = []) {
+  if (!program) return null;
+  return JSON.stringify({
+    id: program.id,
+    name: program.name,
+    workspaceId: program.workspaceId,
+    posture: program.posture,
+    scope: program.scope,
+    supportName: program.supportName,
+    helpChannel: program.helpChannel,
+    organizerChannel: program.organizerChannel,
+    channels: program.channels,
+    aiAnswers: program.aiAnswers,
+    requireGroundedAnswer: program.requireGroundedAnswer,
+    status: program.status,
+    behavior: program.behavior,
+    // Source metadata such as `dynamic` and crawler `paths` changes how the
+    // same URL is interpreted, so keep the complete definitions in the key.
+    sources: [...(program.sources || []), ...(program.sharedSources === false ? [] : sharedSources)],
+    sharedSources: program.sharedSources,
+    milestones: program.milestones,
+    pinnedRules: program.pinnedRules,
+    links: program.links,
+  });
 }
 
 function emptyShared(): ProgramRecord {
@@ -415,13 +442,39 @@ function isProgramScoped(program: string | ProgramRecord | null) {
 }
 
 function saveProgram(prog: ProgramRecord) {
+  const previous = get(prog.id);
+  const previousSharedSources = shared().sources || [];
   db.saveProgram(prog);
   invalidate();
+  const updated = get(prog.id);
+  const updatedSharedSources = shared().sources || [];
+  if (
+    previous &&
+    updated &&
+    answerConfigurationKey(previous, previousSharedSources) !== answerConfigurationKey(updated, updatedSharedSources)
+  ) {
+    try {
+      require("./cache").clearProgramCache(prog.id);
+    } catch (error: unknown) {
+      log.warn(
+        "programs",
+        `failed to invalidate ${prog.id} answer cache: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 }
 
 function removeProgram(id: string) {
   db.deleteProgram(id);
   invalidate();
+  try {
+    require("./cache").clearProgramCache(id);
+  } catch (error: unknown) {
+    log.warn(
+      "programs",
+      `failed to invalidate deleted ${id} answer cache: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function channelRow(

@@ -9,6 +9,7 @@ const { config } = require("./config");
 const llm = require("./llm");
 const log = require("./log");
 const brand = require("./brand");
+const jobLease = require("./jobLease");
 const { coverageStats, relativeTime } = require("./stats");
 import type { Program, SlackClient } from "./types";
 
@@ -431,53 +432,85 @@ function isReportDue(at = new Date()) {
 }
 
 async function postWeekly(client: SlackClient, programId: string | null = null): Promise<boolean> {
-  const channel = reportChannel(programId);
-  if (!channel) return false;
-
-  const text = reportText(0, programId);
-  await client.chat.postMessage({
-    channel,
-    text: `${brand.name()} weekly report`,
-    blocks: reply.plainDashesInBlocks(reportBlocks(0, programId)),
-  });
-  db.recordMetric(SENT_METRIC);
-  log.info("report", `weekly report posted to ${channel}`);
-  return true;
+  const boundary = lastBoundary();
+  const lease = await jobLease.runOnce(
+    `weekly-report:${programId || "shared"}:${boundary}`,
+    5 * 60 * 1000,
+    async () => {
+      if (!isReportDue()) return false;
+      const channel = reportChannel(programId);
+      if (!channel) return false;
+      const text = reportText(0, programId);
+      await client.chat.postMessage({
+        channel,
+        text: `${brand.name()} weekly report`,
+        blocks: reply.plainDashesInBlocks(reportBlocks(0, programId)),
+      });
+      db.recordMetric(SENT_METRIC);
+      log.info("report", `weekly report posted to ${channel}`);
+      return true;
+    },
+  );
+  return lease.ran && lease.result === true;
 }
 
 async function postDailyCosts(client: SlackClient): Promise<boolean> {
   const costReport = require("./costReport");
-  if (!costReport.isCostReportDue()) return false;
-  const channel = reportChannel(null);
-  if (!channel) return false;
-  let rows: Array<Record<string, unknown>> = [];
-  try {
-    rows = db.llmUsageSummary(costReport.DAY_MS);
-  } catch (e: unknown) {
-    log.debug("report", `cost digest read failed: ${e instanceof Error ? e.message : String(e)}`);
-    return false;
-  }
-  const text = costReport.costDigestText(rows);
-  // No calls in 24h is not worth a message.
-  if (!text) return false;
-  await client.chat.postMessage({ channel, text });
-  costReport.markCostReportSent(new Date().toISOString().slice(0, 10));
-  log.info("report", `daily cost digest posted to ${channel}`);
-  return true;
+  const at = new Date();
+  const day = costReport.dayKey(at);
+  const lease = await jobLease.runOnce(`daily-cost-report:${day}`, 5 * 60 * 1000, async () => {
+    if (!costReport.isCostReportDue(at)) return false;
+    const channel = reportChannel(null);
+    if (!channel) return false;
+    let rows: Array<Record<string, unknown>> = [];
+    try {
+      const windowStart = Date.parse(day + "T00:00:00.000Z");
+      const windowEnd = at.getTime() + 1;
+      rows = db.llmUsageSummary(windowEnd - windowStart, windowEnd);
+    } catch (e: unknown) {
+      log.debug("report", `cost digest read failed: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+    const text = costReport.costDigestText(rows, at);
+    // No calls in the reporting window is not worth a message.
+    if (!text) return false;
+    await client.chat.postMessage({ channel, text });
+    costReport.markCostReportSent(day);
+    log.info("report", `daily cost digest posted to ${channel}`);
+    return true;
+  });
+  return lease.ran && lease.result === true;
 }
 
+let tickInFlight: Promise<boolean> | null = null;
+
 async function tick(client: SlackClient): Promise<boolean> {
-  await classifyGaps().catch((e: unknown) =>
-    log.debug("report", `classify pass failed: ${e instanceof Error ? e.message : String(e)}`),
-  );
-  await draftGaps(client).catch((e: unknown) =>
-    log.debug("report", `draft pass failed: ${e instanceof Error ? e.message : String(e)}`),
-  );
-  await postDailyCosts(client).catch((e: unknown) =>
-    log.debug("report", `cost digest failed: ${e instanceof Error ? e.message : String(e)}`),
-  );
-  if (!isReportDue()) return false;
-  return postWeekly(client);
+  if (tickInFlight) return tickInFlight;
+  const run = (async () => {
+    let posted = await postDailyCosts(client).catch((e: unknown) => {
+      log.debug("report", `cost digest failed: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    });
+    if (isReportDue()) {
+      posted =
+        (await postWeekly(client).catch((e: unknown) => {
+          log.debug("report", `weekly report failed: ${e instanceof Error ? e.message : String(e)}`);
+          return false;
+        })) || posted;
+    }
+    await classifyGaps().catch((e: unknown) =>
+      log.debug("report", `classify pass failed: ${e instanceof Error ? e.message : String(e)}`),
+    );
+    await draftGaps(client).catch((e: unknown) =>
+      log.debug("report", `draft pass failed: ${e instanceof Error ? e.message : String(e)}`),
+    );
+    return posted;
+  })();
+  const tracked = run.finally(() => {
+    if (tickInFlight === tracked) tickInFlight = null;
+  });
+  tickInFlight = tracked;
+  return tracked;
 }
 
 function start(

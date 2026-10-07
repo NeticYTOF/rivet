@@ -6,7 +6,7 @@
 // plane still records configuration and marks core_sync_state=pending —
 // configured programs keep serving from Core's last-synced state.
 
-import { timeoutFetch, REQUEST_TIMEOUT_MS } from "@/lib/timeoutFetch";
+import { timeoutFetchJson, REQUEST_TIMEOUT_MS } from "@/lib/timeoutFetch";
 import { coreFetchErrorMessage } from "@/lib/rivetCoreErrors";
 
 // Read at call time, not import time: Next evaluates this module during
@@ -26,20 +26,19 @@ export function coreConfigured(): boolean {
 async function call(path: string, init: RequestInit = {}): Promise<{ status: number; body: unknown }> {
   if (!coreConfigured()) throw new Error("Rivet Core is not configured (RIVET_CORE_BASE_URL/RIVET_INTERNAL_TOKEN)");
   let res: Response;
+  let body: unknown;
   try {
-    res = await timeoutFetch(`${coreBaseUrl()}${path}`, {
+    ({ response: res, body } = await timeoutFetchJson(`${coreBaseUrl()}${path}`, {
       cache: "no-store",
       ...init,
       headers: { Authorization: `Bearer ${coreToken()}`, "Content-Type": "application/json", ...(init.headers || {}) },
-    });
+    }));
   } catch (err) {
-    // timeoutFetch's AbortSignal.timeout rejects with a TimeoutError
-    // DOMException; a hard network failure (DNS, refused, reset) lands here
-    // too. coreFetchErrorMessage keeps the token, headers, and query string
-    // out of what gets thrown.
+    // A request/body deadline and hard network failures (DNS, refused, reset)
+    // land here. coreFetchErrorMessage keeps the token, headers, and query
+    // string out of what gets thrown.
     throw new Error(coreFetchErrorMessage(err, path, REQUEST_TIMEOUT_MS));
   }
-  const body = await res.json().catch(() => ({}));
   return { status: res.status, body };
 }
 

@@ -7,6 +7,7 @@ const cache = require("./cache");
 const knowledge = require("./knowledge");
 const lookup = require("./lookup");
 const warm = require("./warm");
+const programs = require("./programs");
 
 db.open(":memory:");
 
@@ -54,10 +55,37 @@ test("warmOne refuses to cache an answer the docs did not cover", async () => {
   );
 });
 
+test("warmOne bypasses the old answer and refreshes in the original program scope", async () => {
+  cache.clearCache();
+  const savedPrograms = process.env.RIVET_PROGRAMS_JSON;
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([{ id: "acme", name: "Acme", sources: [] }]);
+  programs.invalidate();
+  const original = lookup.answerOrChat;
+  let options: { skipCache?: boolean; program?: { id?: string } } | null = null;
+  const question = "scoped refresh question";
+  cache.put(question, { source: "Old docs", answer: "old" }, undefined, "acme");
+  lookup.answerOrChat = async (_question: string, _context: string, supplied: typeof options) => {
+    options = supplied;
+    return { source: "Acme docs", answer: "new" };
+  };
+  try {
+    assert.equal(await warm.warmOne(question, { refreshed: true, programId: "acme" }), true);
+    assert.equal(options?.skipCache, true);
+    assert.equal(options?.program?.id, "acme");
+    assert.equal(cache.get(question, "acme").answer, "new");
+  } finally {
+    lookup.answerOrChat = original;
+    if (savedPrograms === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedPrograms;
+    programs.invalidate();
+  }
+});
+
 test("warmFaq answers the FAQ questions and skips the ones already known", async () => {
   cache.clearCache();
-  const original = knowledge.faqQuestions;
-  knowledge.faqQuestions = () => ["who can join?", "is this free?", "do i need a team?"];
+  const original = knowledge.faqEntries;
+  knowledge.faqEntries = () =>
+    ["who can join?", "is this free?", "do i need a team?"].map((question) => ({ question, programId: null }));
 
   try {
     cache.put("is this free?", { source: "Acme FAQ", answer: "yep, free" });
@@ -68,14 +96,14 @@ test("warmFaq answers the FAQ questions and skips the ones already known", async
       assert.deepEqual(asked, ["who can join?", "do i need a team?"], "the known one is not re-asked");
     });
   } finally {
-    knowledge.faqQuestions = original;
+    knowledge.faqEntries = original;
   }
 });
 
 test("warmFaq does nothing when everything is already warm", async () => {
   cache.clearCache();
-  const original = knowledge.faqQuestions;
-  knowledge.faqQuestions = () => ["who can join?"];
+  const original = knowledge.faqEntries;
+  knowledge.faqEntries = () => [{ question: "who can join?", programId: null }];
 
   try {
     cache.put("who can join?", { source: "Acme FAQ", answer: "anyone" });
@@ -84,7 +112,7 @@ test("warmFaq does nothing when everything is already warm", async () => {
       assert.deepEqual(asked, []);
     });
   } finally {
-    knowledge.faqQuestions = original;
+    knowledge.faqEntries = original;
   }
 });
 
@@ -140,8 +168,8 @@ test("refreshStale is a no-op when nothing is stale", async () => {
 
 test("a failing answer does not abort the rest of the pass", async () => {
   cache.clearCache();
-  const original = knowledge.faqQuestions;
-  knowledge.faqQuestions = () => ["explodes", "fine"];
+  const original = knowledge.faqEntries;
+  knowledge.faqEntries = () => ["explodes", "fine"].map((question) => ({ question, programId: null }));
 
   try {
     await withAnswers(
@@ -155,35 +183,53 @@ test("a failing answer does not abort the rest of the pass", async () => {
       },
     );
   } finally {
-    knowledge.faqQuestions = original;
+    knowledge.faqEntries = original;
   }
 });
 
 test("warmFaq asks nothing when the corpus has no questions", async () => {
   cache.clearCache();
-  const original = knowledge.faqQuestions;
-  knowledge.faqQuestions = () => [];
+  const original = knowledge.faqEntries;
+  knowledge.faqEntries = () => [];
   try {
     await withAnswers(docsAnswer, async (asked) => {
       assert.equal(await warm.warmFaq({ spacingMs: 0 }), 0);
       assert.deepEqual(asked, []);
     });
   } finally {
-    knowledge.faqQuestions = original;
+    knowledge.faqEntries = original;
   }
 });
 
 test("warmFaq honors an explicit limit", async () => {
   cache.clearCache();
-  const original = knowledge.faqQuestions;
-  knowledge.faqQuestions = () => ["q1?", "q2?", "q3?"];
+  const original = knowledge.faqEntries;
+  knowledge.faqEntries = () => ["q1?", "q2?", "q3?"].map((question) => ({ question, programId: null }));
   try {
     await withAnswers(docsAnswer, async (asked) => {
       assert.equal(await warm.warmFaq({ limit: 1, spacingMs: 0 }), 1);
       assert.equal(asked.length, 1);
     });
   } finally {
-    knowledge.faqQuestions = original;
+    knowledge.faqEntries = original;
+  }
+});
+
+test("FAQ selection interleaves program-specific queues fairly", () => {
+  const original = knowledge.faqEntries;
+  knowledge.faqEntries = () => [
+    { question: "a1", programId: "a" },
+    { question: "a2", programId: "a" },
+    { question: "a3", programId: "a" },
+    { question: "b1", programId: "b" },
+  ];
+  try {
+    assert.deepEqual(
+      warm.fairFaqEntries().map((entry: { question: string }) => entry.question),
+      ["a1", "b1", "a2", "a3"],
+    );
+  } finally {
+    knowledge.faqEntries = original;
   }
 });
 

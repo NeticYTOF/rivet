@@ -44,6 +44,12 @@ test("keyFor differs for genuinely different questions", () => {
   assert.notEqual(cache.keyFor("how do i submit my project"), cache.keyFor("can i submit late"));
 });
 
+test("keyFor distinguishes numbers and negation while keeping program isolation", () => {
+  assert.notEqual(cache.keyFor("Can I submit 1 project?"), cache.keyFor("Can I submit 2 projects?"));
+  assert.notEqual(cache.keyFor("Can I submit?"), cache.keyFor("Can I not submit?"));
+  assert.notEqual(cache.keyFor("Can I join?", "a"), cache.keyFor("Can I join?", "b"));
+});
+
 test("keyFor refuses a question with no meaningful words", () => {
   assert.equal(cache.normalize("what is it"), "");
   assert.equal(cache.keyFor("what is it"), null);
@@ -72,6 +78,17 @@ test("cache keeps the same normalized question isolated by program ID", () => {
   assert.notEqual(cache.keyFor(question, "acme"), cache.keyFor(question, "sprig"));
   assert.deepEqual(cache.get(question, "acme"), { source: "Acme FAQ", answer: "august 18" });
   assert.deepEqual(cache.get(question, "sprig"), { source: "Sprig FAQ", answer: "september 30" });
+});
+
+test("stale cache rows retain their program scope for background refresh", () => {
+  cache.put("scoped stale question", { source: "Docs", answer: "old" }, undefined, "scope-a");
+  db.handle()
+    .query("UPDATE answer_cache SET refreshed_at = 1 WHERE question_hash = ?")
+    .run(cache.keyFor("scoped stale question", "scope-a"));
+  const [entry] = cache
+    .staleCacheEntries(db.CACHE_FRESH_MS, 10)
+    .filter((row: { question: string }) => row.question === "scoped stale question");
+  assert.equal(entry.program_id, "scope-a");
 });
 
 test("an aged answer is still served, so a popular question stays instant", () => {
@@ -130,5 +147,13 @@ test("cache layer itself is unconditional — !contextPrompt guard lives in the 
   cache.put("char unconditional q", { source: "Docs", answer: "stored" });
   assert.ok(cache.get("char unconditional q"));
   assert.equal(cache.put.length >= 2, true);
+});
+
+test("program cache invalidation leaves other programs' answers intact", () => {
+  cache.put("cache invalidation q", { source: "Docs", answer: "A" }, undefined, "program-a");
+  cache.put("cache invalidation q", { source: "Docs", answer: "B" }, undefined, "program-b");
+  cache.clearProgramCache("program-a");
+  assert.equal(cache.get("cache invalidation q", "program-a"), null);
+  assert.equal(cache.get("cache invalidation q", "program-b")?.answer, "B");
 });
 export {};

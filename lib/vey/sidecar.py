@@ -17,6 +17,8 @@ Two decisions per request, because vey.decide() answers ONE question per call:
 No auth. Localhost only. No GPU - CRUX runs on CPU in single-digit ms.
 """
 
+from __future__ import annotations
+
 import json
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -103,10 +105,16 @@ class Handler(BaseHTTPRequestHandler):
             _send(self, 400, {"ok": False, "error": "unsupported version"})
             return
         candidates = body.get("candidates")
-        state = body.get("state") or {}
+        state = body.get("state")
+        if not isinstance(state, dict):
+            _send(self, 400, {"ok": False, "error": "bad state"})
+            return
         message = state.get("message") or ""
         if not isinstance(candidates, dict) or not candidates:
             _send(self, 400, {"ok": False, "error": "no candidates"})
+            return
+        if any(not isinstance(label, str) or not isinstance(text, str) for label, text in candidates.items()):
+            _send(self, 400, {"ok": False, "error": "bad candidates"})
             return
         if not isinstance(message, str) or not message.strip():
             _send(self, 400, {"ok": False, "error": "no message"})
@@ -114,13 +122,18 @@ class Handler(BaseHTTPRequestHandler):
         if any(label not in INTENT_LABELS for label in candidates):
             _send(self, 400, {"ok": False, "error": "unknown intent labels"})
             return
+        conversation = state.get("conversationContext", "")
+        addressed = state.get("addressed", False)
+        if not isinstance(conversation, str) or not isinstance(addressed, bool):
+            _send(self, 400, {"ok": False, "error": "bad state"})
+            return
         try:
             t0 = time.perf_counter()
             intent, mode = decide_intent(message, candidates)
             engage, engage_p = decide_engage(
                 message,
-                str(state.get("conversationContext") or ""),
-                bool(state.get("addressed")),
+                conversation,
+                addressed,
                 intent,
             )
             _send(

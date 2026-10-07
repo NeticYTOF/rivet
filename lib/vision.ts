@@ -27,7 +27,7 @@ function needsSlackFetch(imageUrl: string, slackToken: string | null | undefined
 
 const SKIP = "SKIP";
 
-function visionSystemPrompt(context: string, docs = "") {
+function visionSystemPrompt(context: string, docs = "", requireGrounded = false) {
   return [
     "You are rivet, a helper in a support channel. Someone shared an image.",
     "Answer their question or fix the problem the image shows, like a friendly human helper would.",
@@ -38,6 +38,9 @@ function visionSystemPrompt(context: string, docs = "") {
     `If there's no clear question or problem, or you aren't confident you know the answer, reply with exactly ${SKIP}.`,
     context ? `Conversation so far: ${context}` : "",
     docs ? `Docs:\n${docs}` : "",
+    requireGrounded
+      ? 'For questions about program facts or rules, include direct proof in this exact format: put DOC_SUPPORT: "exact source sentence" on one line and ANSWER: your brief answer on the next. The quoted sentence must appear verbatim in Docs. If Docs do not directly support the answer, reply exactly SKIP. General code debugging based on the image remains allowed without DOC_SUPPORT.'
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -49,6 +52,7 @@ async function analyzeImage(
   context = "",
   slackToken: string | null = null,
   docs = "",
+  requireGrounded = false,
 ) {
   let finalImageUrl = imageUrl;
   if (needsSlackFetch(imageUrl, slackToken)) {
@@ -70,7 +74,7 @@ async function analyzeImage(
       maxTokens: MAX_TOKENS,
       timeout: TIMEOUT_MS,
       messages: [
-        { role: "system", content: visionSystemPrompt(context, docs) },
+        { role: "system", content: visionSystemPrompt(context, docs, requireGrounded) },
         {
           role: "user",
           content: [
@@ -88,4 +92,35 @@ async function analyzeImage(
   return normalizeEmoji(reply);
 }
 
-export = { analyzeImage, visionSystemPrompt };
+function generalCodeDebugQuestion(question: string) {
+  if (
+    /\b(?:deadline|launch|released?|prize|award|reward|grant|eligib\w*|policy|rule|join|submi(?:t|ssion)|price|cost|how much|program|loadout)\b/i.test(
+      question,
+    )
+  ) {
+    return false;
+  }
+  const hasDebugIntent =
+    /\b(?:debug|fix|broken|wrong|why|explain|error|exception|stack trace|build fail(?:ed|ing)?)\b/i.test(question);
+  const hasCodeContext =
+    /\b(?:typescript|javascript|python|rust|java|compiler|stack trace|exception|code|function|variable|syntax|runtime)\b/i.test(
+      question,
+    );
+  return hasDebugIntent && hasCodeContext;
+}
+
+function groundedImageReply(reply: string, question: string, docs: string): string | null {
+  if (generalCodeDebugQuestion(question)) return reply.trim();
+  const match = reply.match(/^\s*DOC_SUPPORT:\s*["“]([^"”\r\n]{12,})["”]\s*\r?\nANSWER:\s*([\s\S]+?)\s*$/i);
+  if (!match || !docs.trim()) return null;
+  const quote = match[1].replace(/\s+/g, " ").trim();
+  const normalizedDocs = docs.replace(/\s+/g, " ").toLowerCase();
+  if (!normalizedDocs.includes(quote.toLowerCase())) return null;
+  return quote;
+}
+
+function isGroundedImageReply(reply: string, question: string, docs: string) {
+  return groundedImageReply(reply, question, docs) !== null;
+}
+
+export = { analyzeImage, visionSystemPrompt, isGroundedImageReply, groundedImageReply };

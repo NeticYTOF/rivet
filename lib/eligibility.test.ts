@@ -7,6 +7,19 @@ const NAMES = ["rivet"];
 const U1 = "<@U111>";
 const U2 = "<@U222>";
 
+test("shared crisis matcher catches direct and indirect self-harm language without program categories", () => {
+  for (const phrase of [
+    "want to hurt myself",
+    "I don't want to be alive",
+    "I might end my life",
+    "thoughts of self harm",
+  ]) {
+    assert.equal(elig.sensitiveHit(phrase, null), true, phrase);
+    assert.equal(run({ text: `<@${BOT}> ${phrase}` }).decision, elig.ESCALATE, phrase);
+  }
+  assert.equal(elig.sensitiveHit("I want to hurt my knee at practice", null), false);
+});
+
 function run(f: any) {
   return elig.shouldRivetRespond({
     text: f.text,

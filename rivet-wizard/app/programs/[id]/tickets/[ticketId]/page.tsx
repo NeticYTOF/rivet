@@ -106,21 +106,19 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   const events = Array.isArray(detail.events) ? detail.events : [];
   const notes = Array.isArray(detail.notes) ? detail.notes : [];
 
-  let macros: MacroRow[] = [];
-  try {
-    macros = (await coreMacrosList(id)) as MacroRow[];
-  } catch {
-    macros = [];
-  }
-  const enabledMacros = macros.filter((m) => m.enabled);
-
-  const identities = await resolveIdentities([
+  const identityIds = [
     ticket.requester_id,
     ticket.assignee_id,
     ticket.resolved_by,
     ...events.map((e) => e.actor_id),
     ...notes.map((n) => n.author_id),
+  ];
+  const [macrosResult, identities] = await Promise.all([
+    coreMacrosList(id).then((rows) => rows as MacroRow[]).catch(() => [] as MacroRow[]),
+    resolveIdentities(identityIds),
   ]);
+  const macros = macrosResult;
+  const enabledMacros = macros.filter((m) => m.enabled);
 
   const decision = ticket.ai_decision ? ticket.ai_decision.replace(/_/g, " ") : null;
 

@@ -19,21 +19,21 @@ export default async function KnowledgePage({ params, searchParams }: { params: 
   const { program } = await requireProgramMembership(id);
   const tab = query.tab === "approved" || query.tab === "rejected" ? query.tab : "candidate";
 
-  let candidates: Fact[] = [];
-  let loadError: string | null = null;
-  try {
-    candidates = (await coreKnowledgeCandidates(id, tab)) as Fact[];
-  } catch (err) {
-    loadError = err instanceof Error ? err.message : "The review queue is unavailable.";
-  }
-
   const sources: DocSource[] = Array.isArray(program.sources) ? program.sources : [];
-  let sourceStatus: KnowledgeSourceStatus[] = [];
-  try {
-    sourceStatus = (await coreKnowledgeStatus(id)).sources;
-  } catch {
-    sourceStatus = [];
-  }
+  const [candidatesResult, statusResult] = await Promise.allSettled([
+    coreKnowledgeCandidates(id, tab),
+    coreKnowledgeStatus(id),
+  ]);
+  const candidates: Fact[] =
+    candidatesResult.status === "fulfilled" ? (candidatesResult.value as Fact[]) : [];
+  const loadError =
+    candidatesResult.status === "rejected"
+      ? candidatesResult.reason instanceof Error
+        ? candidatesResult.reason.message
+        : "The review queue is unavailable."
+      : null;
+  const sourceStatus: KnowledgeSourceStatus[] =
+    statusResult.status === "fulfilled" ? statusResult.value.sources : [];
   const identities = await resolveIdentities(candidates.map((candidate) => candidate.author_id));
 
   return (

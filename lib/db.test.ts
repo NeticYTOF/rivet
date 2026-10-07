@@ -50,6 +50,48 @@ test("answer cache round-trips and misses on an unknown key", () => {
   assert.equal(cache.getCachedAnswer("hash-missing"), null);
 });
 
+test("LLM usage summary can be bounded to an explicit UTC reporting window", () => {
+  db.handle().query("DELETE FROM llm_usage").run();
+  db.recordLlmUsage({ operation: "answer", model: "window-test", status: "success", createdAt: 11_000 });
+  db.recordLlmUsage({ operation: "answer", model: "window-test", status: "success", createdAt: 9_999 });
+  db.recordLlmUsage({ operation: "answer", model: "window-test", status: "success", createdAt: 12_001 });
+  const rows = db.llmUsageSummary(2_000, 12_000);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].requests, 1);
+  assert.equal(rows[0].model, "window-test");
+});
+
+test("LLM usage summary counts unknown-cost attempts inside mixed groups", () => {
+  db.handle().query("DELETE FROM llm_usage").run();
+  const until = Date.now() + 1;
+  db.recordLlmUsage({
+    operation: "answer",
+    model: "mixed-price",
+    status: "success",
+    costUsd: 0.0002,
+    createdAt: until - 3,
+  });
+  db.recordLlmUsage({
+    operation: "answer",
+    model: "mixed-price",
+    status: "error",
+    costUsd: null,
+    createdAt: until - 2,
+  });
+  db.recordLlmUsage({
+    operation: "answer",
+    model: "mixed-price",
+    status: "success",
+    costUsd: null,
+    createdAt: until - 1,
+  });
+  const rows = db.llmUsageSummary(60_000, until);
+  const row = rows.find((entry: TestAny) => entry.model === "mixed-price");
+  assert.equal(row.requests, 3);
+  assert.equal(row.unknown_cost_requests, 2);
+  assert.equal(row.cost_usd, 0.0002);
+});
+
 test("every hit bumps the ask count", () => {
   cache.putCachedAnswer("hash-count", "whats the deadline", { source: "Acme FAQ", answer: "august 18" });
   assert.equal(cache.getCachedAnswer("hash-count").askCount, 1);

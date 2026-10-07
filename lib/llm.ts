@@ -39,6 +39,8 @@ interface CompletionOptions {
   fallback?: ProviderTier | null;
   telemetry?: Telemetry;
   onRateLimited?: (key: string | undefined, ms?: number) => void;
+  deadlineAt?: number;
+  fallbackAttempt?: boolean;
 }
 interface LlmError extends Error {
   response?: { status?: number };
@@ -120,6 +122,7 @@ const KNOWN_PRICING = Object.freeze({
   "openai/gpt-4o-mini": { input: 0.15, output: 0.6 },
   "openai/gpt-4o": { input: 2.5, output: 10 },
   "openai/gpt-4.1-nano": { input: 0.1, output: 0.4 },
+  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
   "openai/gpt-4.1-mini": { input: 0.4, output: 1.6 },
   "deepseek/deepseek-v4-flash-0731": { input: 0.0152, output: 1.28 },
   "deepseek/deepseek-v4.1-flash": { input: 0.3, output: 1.2 },
@@ -188,6 +191,12 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+function remainingTimeout(options: CompletionOptions) {
+  const remaining = (options.deadlineAt || Infinity) - Date.now();
+  if (remaining <= 0) throw new Error("LLM request timed out");
+  return Math.max(1, Math.min(options.timeout || DEFAULT_TIMEOUT_MS, remaining));
+}
+
 function noteRateLimit(options: CompletionOptions, err: LlmError) {
   if (err?.response?.status !== 429 || !options.onRateLimited) return;
   const usedKey = err.usedKey || (typeof options.apiKey === "function" ? options.apiKey() : options.apiKey);
@@ -251,6 +260,7 @@ async function requestCompletion({
   reasoningEffort,
   includeReasoning,
   timeout,
+  deadlineAt,
 }: CompletionOptions): Promise<CompletionResult> {
   const usedKey = typeof apiKey === "function" ? apiKey() : apiKey;
   const filteredThinking = thinkingFor(model, thinking);
@@ -272,7 +282,7 @@ async function requestCompletion({
           Authorization: `Bearer ${usedKey}`,
           "Content-Type": "application/json",
         },
-        timeout: timeout || DEFAULT_TIMEOUT_MS,
+        timeout: Math.max(1, Math.min(timeout || DEFAULT_TIMEOUT_MS, (deadlineAt || Infinity) - Date.now())),
         httpsAgent: keepAliveAgent,
       },
     );
@@ -303,11 +313,16 @@ async function completeAttempts(options: CompletionOptions, scope: string): Prom
   };
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      remainingTimeout(instrumented);
+    } catch (error) {
+      throw error;
+    }
     const startedAt = Date.now();
     try {
       const result = await requestCompletion(instrumented);
       result.attempt = attempt + 1;
-      result.retryCount = attempt;
+      result.retryCount = attempt > 0 || instrumented.fallbackAttempt ? 1 : 0;
       result.latencyMs = Date.now() - startedAt;
       recordUsage(instrumented, { ...result, status: result.text?.trim() ? "success" : "empty" });
       if (result.text?.trim()) return result;
@@ -322,7 +337,7 @@ async function completeAttempts(options: CompletionOptions, scope: string): Prom
         status: "error",
         httpStatus: err.response?.status,
         attempt: attempt + 1,
-        retryCount: attempt,
+        retryCount: attempt > 0 || instrumented.fallbackAttempt ? 1 : 0,
         latencyMs: Date.now() - startedAt,
         errorKind: err.response?.status === 429 ? "rate_limit" : err.code || "request",
       });
@@ -332,7 +347,8 @@ async function completeAttempts(options: CompletionOptions, scope: string): Prom
       log.debug(scope, `request failed (${status}), attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
     }
 
-    if (attempt < MAX_ATTEMPTS - 1) await sleep(backoffMs(attempt));
+    if (attempt < MAX_ATTEMPTS - 1)
+      await sleep(Math.min(backoffMs(attempt), Math.max(0, (instrumented.deadlineAt || Infinity) - Date.now())));
   }
 
   if (lastError) throw lastError;
@@ -344,7 +360,13 @@ function describeError(err: LlmError) {
 }
 
 async function complete(options: CompletionOptions, scope = "llm") {
-  const { fallback, ...primary } = options;
+  const deadlineAt = options.deadlineAt || Date.now() + (options.timeout || DEFAULT_TIMEOUT_MS);
+  const requestId = options.telemetry?.requestId || crypto.randomUUID();
+  const { fallback, ...primary } = {
+    ...options,
+    deadlineAt,
+    telemetry: { ...options.telemetry, requestId },
+  };
 
   try {
     return await completeAttempts(primary, scope);
@@ -355,7 +377,7 @@ async function complete(options: CompletionOptions, scope = "llm") {
       scope,
       `${primary.model || primary.baseUrl} failed (${describeError(err)}) — falling back to ${fallback.model || fallback.baseUrl}`,
     );
-    return await complete({ ...primary, ...fallback }, `${scope}-fallback`);
+    return await complete({ ...primary, ...fallback, fallbackAttempt: true }, `${scope}-fallback`);
   }
 }
 
@@ -368,6 +390,7 @@ function parseSseChunk(buffer: string, { flush = false }: { flush?: boolean } = 
     rest = "";
   }
   let finishReason: string | null = null;
+  let usage: Usage | undefined;
 
   for (const line of lines) {
     if (!line.startsWith("data:")) continue;
@@ -380,16 +403,17 @@ function parseSseChunk(buffer: string, { flush = false }: { flush?: boolean } = 
       continue;
     }
     const choice = firstChoice(frame);
+    if (frame.usage) usage = usageFor(frame);
     const delta = asRecord(choice.delta).content;
     if (typeof delta === "string" && delta) deltas.push(delta);
     if (typeof choice.finish_reason === "string" && choice.finish_reason) finishReason = choice.finish_reason;
   }
 
-  return { deltas, rest, finishReason };
+  return { deltas, rest, finishReason, usage };
 }
 
-async function streamCompletion(
-  {
+async function streamCompletion(options: CompletionOptions, onDelta: (delta: string, text: string) => boolean | void) {
+  const {
     baseUrl,
     apiKey,
     model,
@@ -400,15 +424,17 @@ async function streamCompletion(
     reasoningEffort,
     includeReasoning,
     timeout,
-  }: CompletionOptions,
-  onDelta: (delta: string, text: string) => boolean | void,
-) {
+    deadlineAt,
+  } = options;
   const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => controller.abort(), timeout || DEFAULT_TIMEOUT_MS);
-  const clearFirstTokenTimer = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-  };
+  const requestTimeout = remainingTimeout(options);
+  const deadline = Date.now() + requestTimeout;
+  const timer = setTimeout(() => controller.abort(new Error("stream timed out")), requestTimeout);
+  let reader: {
+    read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+    cancel?: () => Promise<void>;
+    releaseLock?: () => void;
+  } | null = null;
 
   const usedKey = typeof apiKey === "function" ? apiKey() : apiKey;
   const filteredThinking = thinkingFor(model, thinking);
@@ -422,6 +448,7 @@ async function streamCompletion(
         model,
         max_tokens: maxTokens,
         stream: true,
+        stream_options: { include_usage: true },
         ...(temperature === undefined ? {} : { temperature }),
         ...(filteredThinking === undefined ? {} : { thinking: filteredThinking }),
         ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
@@ -440,7 +467,7 @@ async function streamCompletion(
     }
     if (!res.body) throw new Error("stream failed: no response body");
 
-    const reader = res.body.getReader();
+    reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let text = "";
@@ -448,12 +475,12 @@ async function streamCompletion(
     let insideThink = false;
     let thinkBuffer = "";
     let finishReason: string | null = null;
+    let usage: Usage | undefined;
 
-    const applyFrames = (frames: { finishReason: string | null; deltas: string[] }) => {
+    const applyFrames = (frames: { finishReason: string | null; deltas: string[]; usage?: Usage }) => {
       if (frames.finishReason) finishReason = frames.finishReason;
+      if (frames.usage) usage = frames.usage;
       for (const delta of frames.deltas) {
-        clearFirstTokenTimer();
-
         const hasThinkOpen = (s: string) => /<(?:think|thinking|thought|scratchpad)>/i.test(s);
         const hasThinkClose = (s: string) => /<\/(?:think|thinking|thought|scratchpad)>/i.test(s);
 
@@ -480,7 +507,15 @@ async function streamCompletion(
     };
 
     while (true) {
-      const { done, value } = await reader.read();
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("stream timed out");
+      let idleTimer: ReturnType<typeof setTimeout>;
+      const { done, value } = await Promise.race([
+        reader.read(),
+        new Promise<never>((_resolve, reject) => {
+          idleTimer = setTimeout(() => reject(new Error("stream read timed out")), remaining);
+        }),
+      ]).finally(() => clearTimeout(idleTimer));
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -500,9 +535,14 @@ async function streamCompletion(
       throw new Error(`stream ended without a complete answer (finish_reason=${finishReason || "missing"})`);
     }
 
-    return { text, stopped, usedKey, finishReason };
+    return { text, stopped, usedKey, finishReason, usage };
   } finally {
-    clearFirstTokenTimer();
+    clearTimeout(timer);
+    if (reader) {
+      controller.abort();
+      if (typeof reader.cancel === "function") await reader.cancel().catch(() => undefined);
+      if (typeof reader.releaseLock === "function") reader.releaseLock();
+    }
   }
 }
 
@@ -512,8 +552,15 @@ async function streamAttempts(
   scope: string,
 ) {
   let lastError: LlmError | null = null;
+  const requestId = options.telemetry?.requestId || crypto.randomUUID();
+  const instrumented = {
+    ...options,
+    telemetry: { ...options.telemetry, operation: options.telemetry?.operation || scope, requestId },
+  };
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    remainingTimeout(instrumented);
+    const startedAt = Date.now();
     let streamed = false;
     const track = (delta: string, text: string) => {
       streamed = true;
@@ -521,12 +568,27 @@ async function streamAttempts(
     };
 
     try {
-      const result = await streamCompletion(options, track);
+      const result = await streamCompletion(instrumented, track);
+      recordUsage(instrumented, {
+        ...result,
+        attempt: attempt + 1,
+        retryCount: attempt > 0 || instrumented.fallbackAttempt ? 1 : 0,
+        latencyMs: Date.now() - startedAt,
+        status: result.text.trim() || result.stopped ? "success" : "empty",
+      });
       if (result.text.trim() || result.stopped) return result;
       log.debug(scope, `empty stream, attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
     } catch (error: unknown) {
       const err = toLlmError(error);
       lastError = err;
+      recordUsage(instrumented, {
+        status: "error",
+        httpStatus: err.response?.status,
+        attempt: attempt + 1,
+        retryCount: attempt > 0 || instrumented.fallbackAttempt ? 1 : 0,
+        latencyMs: Date.now() - startedAt,
+        errorKind: err.response?.status === 429 ? "rate_limit" : err.code || "request",
+      });
       noteRateLimit(options, err);
       if (streamed) throw err;
       if (!isRetryableError(err)) throw err;
@@ -534,7 +596,8 @@ async function streamAttempts(
       log.debug(scope, `stream failed (${status}), attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
     }
 
-    if (attempt < MAX_ATTEMPTS - 1) await sleep(backoffMs(attempt));
+    if (attempt < MAX_ATTEMPTS - 1)
+      await sleep(Math.min(backoffMs(attempt), Math.max(0, (options.deadlineAt || Infinity) - Date.now())));
   }
 
   if (lastError) throw lastError;
@@ -546,7 +609,13 @@ async function completeStream(
   onDelta: (delta: string, text: string) => boolean | void,
   scope = "llm",
 ) {
-  const { fallback, ...primary } = options;
+  const deadlineAt = options.deadlineAt || Date.now() + (options.timeout || DEFAULT_TIMEOUT_MS);
+  const requestId = options.telemetry?.requestId || crypto.randomUUID();
+  const { fallback, ...primary } = {
+    ...options,
+    deadlineAt,
+    telemetry: { ...options.telemetry, requestId },
+  };
 
   let streamedAny = false;
   const track = (delta: string, text: string) => {
@@ -563,7 +632,7 @@ async function completeStream(
       scope,
       `${primary.model || primary.baseUrl} failed (${describeError(err)}) — falling back to ${fallback.model || fallback.baseUrl}`,
     );
-    return await completeStream({ ...primary, ...fallback }, track, `${scope}-fallback`);
+    return await completeStream({ ...primary, ...fallback, fallbackAttempt: true }, track, `${scope}-fallback`);
   }
 }
 
