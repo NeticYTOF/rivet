@@ -168,6 +168,31 @@ test("program source corpora remain isolated", async () => {
   }
 });
 
+test("refreshSource invalidates cached source sections", async () => {
+  const saved = process.env.RIVET_PROGRAMS_JSON;
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "cache-demo", name: "Cache Demo", sources: [{ name: "Docs", type: "text", content: "version-one token" }] },
+  ]);
+  programs.invalidate();
+  knowledge.invalidate();
+  try {
+    const source = programs.get("cache-demo").sources[0];
+    await knowledge.refreshSource(source, true);
+    assert.match(knowledge.getContext("version one", "cache-demo"), /version-one token/);
+
+    source.content = "version-two token";
+    await knowledge.refreshSource(source, true);
+    const refreshed = knowledge.getContext("version two", "cache-demo");
+    assert.match(refreshed, /version-two token/);
+    assert.doesNotMatch(refreshed, /version-one token/);
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = saved;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
+});
+
 test("draft knowledge uses only supplied source text", () => {
   const result = knowledge.registerDraftKnowledge(
     { id: "draft-demo", status: "suspended", privateSandboxOnly: true },
