@@ -88,6 +88,7 @@ const corpusCacheMap = new Map<string, string>();
 const corpusBuiltOnMap = new Map<string, string>();
 const retrievalIndexMap = new Map<string, RetrievalIndex>();
 const sourceSectionsCacheMap = new Map<string, Section[]>();
+let sourceSectionsProgramsVersion = -1;
 const draftCorpusMap = new Map<string, string>();
 const draftIndexMap = new Map<string, { docs: unknown[] }>();
 
@@ -100,6 +101,7 @@ function invalidate() {
   corpusBuiltOnMap.clear();
   retrievalIndexMap.clear();
   sourceSectionsCacheMap.clear();
+  sourceSectionsProgramsVersion = -1;
   draftCorpusMap.clear();
   draftIndexMap.clear();
 }
@@ -854,6 +856,11 @@ function memText(source: SourceRecord) {
 }
 
 function sourceSections(programId: string | null = null): Section[] {
+  const programVersion = typeof programs.version === "function" ? programs.version() : 0;
+  if (sourceSectionsProgramsVersion !== programVersion) {
+    sourceSectionsCacheMap.clear();
+    sourceSectionsProgramsVersion = programVersion;
+  }
   const key = programId || "shared";
   const cached = sourceSectionsCacheMap.get(key);
   if (cached) return cached;
