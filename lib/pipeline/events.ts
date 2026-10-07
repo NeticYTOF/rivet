@@ -14,6 +14,10 @@ const FIELDS = [
   "helper_escalated",
   "final_action",
   "reason",
+  "context_ms",
+  "classify_ms",
+  "link_ms",
+  "answer_ms",
   "latency_ms",
   "provider_error_kind",
 ];
@@ -54,6 +58,10 @@ function start({ programId = null, role = null, addressed = false }: EventOption
       if ("groundingPass" in fields) event.grounding_pass = fields.groundingPass;
       if ("ticketRequested" in fields) event.ticket_requested = fields.ticketRequested;
       if ("helperEscalated" in fields) event.helper_escalated = fields.helperEscalated;
+      if ("contextMs" in fields) event.context_ms = fields.contextMs;
+      if ("classifyMs" in fields) event.classify_ms = fields.classifyMs;
+      if ("linkMs" in fields) event.link_ms = fields.linkMs;
+      if ("answerMs" in fields) event.answer_ms = fields.answerMs;
     },
     finish(fields: EventFields = {}) {
       if (done) return event;
