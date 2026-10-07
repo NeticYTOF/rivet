@@ -342,6 +342,64 @@ test("program source corpora remain isolated", async () => {
   }
 });
 
+test("refreshSource invalidates cached source sections", async () => {
+  const saved = process.env.RIVET_PROGRAMS_JSON;
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "cache-demo", name: "Cache Demo", sources: [{ name: "Docs", type: "text", content: "version-one token" }] },
+  ]);
+  programs.invalidate();
+  knowledge.invalidate();
+  try {
+    const source = programs.get("cache-demo").sources[0];
+    await knowledge.refreshSource(source, true);
+    assert.match(knowledge.getContext("version one", "cache-demo"), /version-one token/);
+
+    source.content = "version-two token";
+    await knowledge.refreshSource(source, true);
+    const refreshed = knowledge.getContext("version two", "cache-demo");
+    assert.match(refreshed, /version-two token/);
+    assert.doesNotMatch(refreshed, /version-one token/);
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = saved;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
+});
+
+test("program invalidation drops cached source-section views", async () => {
+  const saved = process.env.RIVET_PROGRAMS_JSON;
+  const sourceA = { name: "Docs A", type: "text", content: "alpha-source token" };
+  const sourceB = { name: "Docs B", type: "text", content: "beta-source token" };
+
+  await knowledge.refreshSource(sourceA, true);
+  await knowledge.refreshSource(sourceB, true);
+
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+    { id: "versioned", name: "Versioned", sources: [sourceA] },
+  ]);
+  programs.invalidate();
+  knowledge.invalidate();
+
+  try {
+    assert.match(knowledge.getContext("alpha source", "versioned"), /alpha-source token/);
+
+    process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
+      { id: "versioned", name: "Versioned", sources: [sourceB] },
+    ]);
+    programs.invalidate();
+
+    const refreshed = knowledge.getContext("beta source", "versioned");
+    assert.match(refreshed, /beta-source token/);
+    assert.doesNotMatch(refreshed, /alpha-source token/);
+  } finally {
+    if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = saved;
+    programs.invalidate();
+    knowledge.invalidate();
+  }
+});
+
 test("draft knowledge uses only supplied source text", () => {
   const result = knowledge.registerDraftKnowledge(
     { id: "draft-demo", status: "suspended", privateSandboxOnly: true },
