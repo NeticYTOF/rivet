@@ -422,25 +422,30 @@ test("addressed URL fetch starts before classification finishes", async () => {
     await classifierGate;
     return { action: "engage", intent: "addressed_general_request" };
   });
-  stub(link, "fetchUrlContent", async () => {
+  const realFetchUrlContent = link.fetchUrlContent;
+  link.fetchUrlContent = async () => {
     linkStarted = true;
     releaseClassifier?.();
     return { url: "https://example.com", text: "example page content" };
-  });
+  };
   stub(lookup, "answerOrChat", async (_question: string, ctx: string) => {
     expect(linkStarted).toBe(true);
     expect(ctx).toContain("example page content");
     return { answer: "I read the linked page.", source: "NONE" };
   });
 
-  expect(
-    await send({
-      channel: "C_ACME_MAIN",
-      text: "check this https://example.com",
-      addressed: true,
-    }),
-  ).toBe(true);
-  expect(linkStarted).toBe(true);
+  try {
+    expect(
+      await send({
+        channel: "C_ACME_MAIN",
+        text: "check this https://example.com",
+        addressed: true,
+      }),
+    ).toBe(true);
+    expect(linkStarted).toBe(true);
+  } finally {
+    link.fetchUrlContent = realFetchUrlContent;
+  }
 });
 
 test("addressed: a cookie recipe gets a general-purpose answer", async () => {
