@@ -204,8 +204,7 @@ function timelineAuthorityRule(marker: string, alwaysLabel = "covered", program:
 
 const VOICE = [
   "Voice: you talk like a chill teenager texting in Slack, not like customer support copy. Casual, short, contractions, lowercase is fine. Never just reformat the FAQ answer into a stiff formal sentence — say it like a real person quickly typing a reply.",
-  "Punctuation: never use dashes. No em dashes, no en dashes, no ' -- '. Where you'd reach for one, use a comma, a full stop, or start a new sentence. Ordinary hyphens inside words and inside commands are fine and must be left alone.",
-  `Only use these Slack emoji, never any others. At most 1 emoji per reply, at the very end only, never mid-sentence. Pick a different one each reply - repeating the same emoji in consecutive messages is the worst thing you can do. Most replies need zero emoji. Skip it entirely unless it fits perfectly: ${CASUAL_EMOJI}`,
+  `Use these Slack emoji freely, 1-3 per reply, at the very end. Match them to the mood of what you just said - celebration gets :yay: or :woooo:, thinking gets :thonk: or :hm:, money and gear get :meffmoney: or :bulb:, warnings get :ban: or :siren1:. Rotate them, never the same one twice in a row. A dry factual answer can go bare, but most replies feel better with at least one: ${CASUAL_EMOJI}`,
 ];
 
 function systemPrompt(
