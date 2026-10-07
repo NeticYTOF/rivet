@@ -357,6 +357,9 @@ interface SlackError {
   message?: string;
   code?: string;
   data?: { error?: string };
+  status?: number;
+  statusCode?: number;
+  response?: { status?: number };
 }
 interface SlackChannel {
   id: string;
@@ -2117,6 +2120,16 @@ async function fetchSlackChannels(): Promise<ApiResponse> {
     return { ok: true, channels };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
+    const slackError = e as SlackError;
+    if (
+      slackError?.code === "ratelimited" ||
+      slackError?.data?.error === "ratelimited" ||
+      slackError?.status === 429 ||
+      slackError?.statusCode === 429 ||
+      slackError?.response?.status === 429
+    ) {
+      db.recordMetric("slack_api_rate_limit", null, "conversations.list");
+    }
     slackChannelsFailure = { at: Date.now(), reason };
     return { ok: false, reason, channels: [] };
   }

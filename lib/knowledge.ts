@@ -1072,6 +1072,22 @@ function sourceStatus(programId: string | null) {
   });
 }
 
+function repeatedSourceFailures(minFailures = 2) {
+  const failures: Array<{ programId: string; name: string; failCount: number }> = [];
+  for (const program of programs.all()) {
+    const { sources } = programSourcesForStatus(program.id);
+    const keys = sources.map((source) => sourceCacheKey(source) || source.name);
+    const health = db.getSourceHealth(keys) as SourceHealthRow[];
+    const byName = new Map(health.map((row) => [row.name, row]));
+    for (const source of sources) {
+      const key = sourceCacheKey(source) || source.name;
+      const failCount = Number(byName.get(key)?.fail_count || 0);
+      if (failCount >= minFailures) failures.push({ programId: program.id, name: source.name, failCount });
+    }
+  }
+  return failures;
+}
+
 async function refreshSourceTracked(source: SourceRecord, force: boolean) {
   const key = memKey(source);
   const existing = sourceRefreshes.get(key);
@@ -1208,6 +1224,7 @@ export = {
   faqEntries,
   getIndex,
   sourceStatus,
+  repeatedSourceFailures,
   refreshProgramSources,
   registerDraftKnowledge,
   ingestDraftSources,

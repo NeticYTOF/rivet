@@ -535,6 +535,41 @@ test("reportChannel prefers explicit config over the help channel", () => {
   }
 });
 
+test("operational alerts use the report channel and only post on state changes", async () => {
+  db.handle().query("DELETE FROM metrics").run();
+  const originalReport = config.reportChannel;
+  const originalHelp = config.slack.helpChannel;
+  config.reportChannel = "C-REPORT";
+  config.slack.helpChannel = "C-HELP";
+  const posts: Array<{ channel: string; text: string }> = [];
+  const client = {
+    chat: {
+      postMessage: async (payload: { channel: string; text: string }) => {
+        posts.push(payload);
+      },
+    },
+  };
+
+  try {
+    db.recordMetric("slack_api_rate_limit", null, "conversations.list");
+    db.recordMetric("slack_api_rate_limit", null, "conversations.list");
+    db.recordMetric("slack_api_rate_limit", null, "conversations.list");
+    assert.equal(await report.postOperationalHealth(client), true);
+    assert.equal(posts[0].channel, "C-REPORT");
+    assert.match(posts[0].text, /channel-list API has been rate limited/);
+    assert.equal(await report.postOperationalHealth(client), false);
+    assert.equal(posts.length, 1, "unchanged issues do not repeat");
+
+    db.handle().query("DELETE FROM metrics WHERE kind = ?").run("slack_api_rate_limit");
+    assert.equal(await report.postOperationalHealth(client), true);
+    assert.match(posts[1].text, /issues have cleared/);
+  } finally {
+    config.reportChannel = originalReport;
+    config.slack.helpChannel = originalHelp;
+    db.handle().query("DELETE FROM metrics").run();
+  }
+});
+
 test("collect windows are exactly one week and coverage is docs/total", () => {
   db.handle().query("DELETE FROM doc_gaps").run();
   db.handle().query("DELETE FROM metrics").run();

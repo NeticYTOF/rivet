@@ -68,6 +68,11 @@ const REPORT_DAY = 1;
 const REPORT_HOUR = 9;
 
 const SENT_METRIC = "weekly_report";
+const OPS_STATE_METRIC = "operational_health_alerts";
+const SLACK_RATE_LIMIT_METRIC = "slack_api_rate_limit";
+const SLACK_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const SLACK_RATE_LIMIT_TRIGGER = 3;
+const SOURCE_FAILURE_TRIGGER = 2;
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -482,6 +487,63 @@ async function postDailyCosts(client: SlackClient): Promise<boolean> {
   return lease.ran && lease.result === true;
 }
 
+function lastOperationalState(): string[] {
+  try {
+    const row = db
+      .handle()
+      .query("SELECT detail FROM metrics WHERE kind = ? ORDER BY created_at DESC LIMIT 1")
+      .get(OPS_STATE_METRIC) as { detail?: string } | null;
+    const parsed = row?.detail ? JSON.parse(row.detail) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string").sort() : [];
+  } catch (_error: unknown) {
+    return [];
+  }
+}
+
+function currentOperationalState(): { keys: string[]; lines: string[] } {
+  const keys: string[] = [];
+  const lines: string[] = [];
+  try {
+    const seen = new Set<string>();
+    for (const source of knowledge.repeatedSourceFailures(SOURCE_FAILURE_TRIGGER)) {
+      const key = `source:${source.programId}:${source.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+      lines.push(`Knowledge source “${source.name}” has failed ${source.failCount} times in a row.`);
+    }
+  } catch (error: unknown) {
+    log.warn("report", `operational source check failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const rateLimitCount = Number(
+    db.metricCounts(SLACK_RATE_LIMIT_WINDOW_MS).find((row: MetricRow) => row.kind === SLACK_RATE_LIMIT_METRIC)?.count ||
+      0,
+  );
+  const wasRateLimited = lastOperationalState().includes("slack-rate-limit");
+  if (rateLimitCount >= (wasRateLimited ? 1 : SLACK_RATE_LIMIT_TRIGGER)) {
+    keys.push("slack-rate-limit");
+    lines.push(`Slack’s channel-list API has been rate limited ${rateLimitCount} times in the past hour.`);
+  }
+  return { keys: keys.sort(), lines: lines.sort() };
+}
+
+async function postOperationalHealth(client: SlackClient): Promise<boolean> {
+  const channel = reportChannel(null);
+  if (!channel) return false;
+  const previous = lastOperationalState();
+  const current = currentOperationalState();
+  if (JSON.stringify(previous) === JSON.stringify(current.keys)) return false;
+
+  const text = current.lines.length
+    ? `Rivet operational alert\n${current.lines.map((line) => `• ${line}`).join("\n")}`
+    : "Rivet operational alert: the reported issues have cleared.";
+  await client.chat.postMessage({ channel, text });
+  db.recordMetric(OPS_STATE_METRIC, null, JSON.stringify(current.keys));
+  log.info("report", `operational health update posted to ${channel}`);
+  return true;
+}
+
 let tickInFlight: Promise<boolean> | null = null;
 
 async function tick(client: SlackClient): Promise<boolean> {
@@ -491,6 +553,9 @@ async function tick(client: SlackClient): Promise<boolean> {
       log.debug("report", `cost digest failed: ${e instanceof Error ? e.message : String(e)}`);
       return false;
     });
+    await postOperationalHealth(client).catch((e: unknown) =>
+      log.warn("report", `operational health update failed: ${e instanceof Error ? e.message : String(e)}`),
+    );
     if (isReportDue()) {
       posted =
         (await postWeekly(client).catch((e: unknown) => {
@@ -549,6 +614,8 @@ export = {
   reportText,
   reportBlocks,
   reportChannel,
+  currentOperationalState,
+  postOperationalHealth,
   lastBoundary,
   isReportDue,
   postWeekly,
