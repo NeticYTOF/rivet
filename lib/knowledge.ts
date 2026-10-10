@@ -889,6 +889,7 @@ function sourceSections(programId: string | null = null): Section[] {
   const programVersion = typeof programs.version === "function" ? programs.version() : 0;
   if (sourceSectionsProgramsVersion !== programVersion) {
     sourceSectionsCacheMap.clear();
+    retrievalIndexMap.clear();
     sourceSectionsProgramsVersion = programVersion;
   }
   const key = programId || "shared";
@@ -959,8 +960,9 @@ function getCorpus(programId: string | null = null): string {
 
 function getIndex(programId: string | null = null) {
   const key = programId || "shared";
+  const sources = sourceSections(programId);
   if (!retrievalIndexMap.has(key)) {
-    const idx = retrieve.buildIndex(retrieve.chunkSections(sourceSections(programId)));
+    const idx = retrieve.buildIndex(retrieve.chunkSections(sources));
     retrievalIndexMap.set(key, idx);
     log.debug("knowledge", `retrieval index built for ${key} — ${idx.docs.length} chunks`);
   }
@@ -991,6 +993,24 @@ function selectContextFor(question: string, programId: string | null) {
 
 function getContext(question: string, programId: string | null = null) {
   return selectContextFor(question, programId);
+}
+
+function getEvidenceContext(question: string, programId: string | null = null) {
+  const sources = sourceSections(programId);
+  const generated = generatedSections(programId, question);
+  const index = retrieve.buildIndex(retrieve.chunkSections([...generated, ...sources]));
+  const programSourceNames = new Set(sources.map(([name]) => name.toLowerCase()));
+  const passages = retrieve.selectEvidence(index, question, retrieve.DEFAULT_BUDGET).map((passage) => ({
+    ...passage,
+    programId,
+    kind: programSourceNames.has(passage.source.toLowerCase()) ? "source" : "generated",
+  }));
+  return {
+    context: passages
+      .map(({ id, source, heading, text }) => `### ${source} [${id}]${heading ? ` — ${heading}` : ""}\n${text}`)
+      .join("\n\n"),
+    passages,
+  };
 }
 
 function sanitizeStatusUrl(url: unknown) {
@@ -1220,6 +1240,7 @@ export = {
   sourceContainsCitation,
   getCorpus,
   getContext,
+  getEvidenceContext,
   faqQuestions,
   faqEntries,
   getIndex,

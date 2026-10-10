@@ -204,29 +204,21 @@ async function withStreamedAnswer(chunks: string[], fn: () => Promise<unknown>) 
 }
 
 function stubAnswers(impl: (...args: never[]) => unknown) {
-  const origPlain = answer.getAnswerOrChat;
-  const origStream = answer.getAnswerOrChatStream;
-  answer.getAnswerOrChat = async (
-    q: string,
-    corpus: string,
-    ctx: string,
-    inHelp: boolean,
-    prog: unknown,
-    channel: string,
-    opts: Record<string, unknown> = {},
-  ) =>
-    (impl as (...args: unknown[]) => unknown)(q, corpus, ctx, {
-      onText: null,
-      inHelpChannel: inHelp,
-      program: prog,
-      channel,
-      ...(opts || {}),
-    });
-  answer.getAnswerOrChatStream = async (q: string, corpus: string, ctx: string, opts: StreamOptions = {}) =>
-    (impl as (...args: unknown[]) => unknown)(q, corpus, ctx, opts);
+  const original = lookup.answerOrChat;
+  lookup.answerOrChat = async (q: string, ctx: string, opts: Record<string, unknown> = {}) => {
+    const result = await (impl as (...args: unknown[]) => unknown)(q, ctx, ctx, opts);
+    const program = opts.program as { id?: string } | undefined;
+    if (!result || typeof result !== "object" || !(result as { source?: string }).source || !program?.id) return result;
+    const record = result as { source: string; answer: string };
+    const id = `test-${program.id}`;
+    return {
+      ...record,
+      passageCitations: [id],
+      citationEvidence: [{ id, source: record.source, text: record.answer, programId: program.id }],
+    };
+  };
   return () => {
-    answer.getAnswerOrChat = origPlain;
-    answer.getAnswerOrChatStream = origStream;
+    lookup.answerOrChat = original;
   };
 }
 
@@ -274,15 +266,19 @@ test("respond streams the answer into the placeholder instead of waiting for all
   }
 });
 
-test("a fresh question is cacheable, and the repeat costs no model call", async () => {
+test("an uncited cached document answer is bypassed", async () => {
   const client = fakeClient();
   const question = "how do i export a sprite";
-
   let modelCalls = 0;
-  const restoreAnswers = stubAnswers(async () => {
+  const originalPlain = answer.getAnswerOrChat;
+  const originalStream = answer.getAnswerOrChatStream;
+  answer.getAnswerOrChat = async () => {
     modelCalls += 1;
     return { source: "Acme FAQ", answer: "export it as a PNG at native size" };
-  });
+  };
+  answer.getAnswerOrChatStream = answer.getAnswerOrChat;
+  const progId = require("./programs").forChannel("C1").id;
+  cache.put(question, { source: "Acme FAQ", answer: "export it as a PNG at native size" }, progId);
 
   try {
     await respond.respond({
@@ -293,22 +289,11 @@ test("a fresh question is cacheable, and the repeat costs no model call", async 
       question,
       mode: respond.ALWAYS,
     });
-    assert.equal(modelCalls, 1);
-    const progId = require("./programs").forChannel("C1").id;
-    assert.notEqual(cache.get(question, progId), null, "the answer should have been cached");
-    assert.equal(cache.get(question, "__other_program__"), null, "another program must miss");
-
-    await respond.respond({
-      client,
-      channel: "C1",
-      threadTs: "t-cache-b",
-      userId: "U-other",
-      question: "  sprite   EXPORT?? ",
-      mode: respond.ALWAYS,
-    });
-    assert.equal(modelCalls, 1, "the repeat should have been served from cache");
+    assert.equal(modelCalls, 1, "the old uncited entry must not suppress a fresh lookup");
+    assert.ok(!client.calls.posts.join(" ").includes("export it as a PNG"));
   } finally {
-    restoreAnswers();
+    answer.getAnswerOrChat = originalPlain;
+    answer.getAnswerOrChatStream = originalStream;
   }
 });
 
@@ -721,30 +706,35 @@ test("the answer call is handed the program record and the channel it is in", as
   assert.ok(answerSeen?.program?.name, "with a display name the prompt can use");
 });
 
-test("a known answer is one Slack call, with no placeholder", async () => {
-  const client = fakeClient();
-  let modelCalls = 0;
-  const restoreAnswers = stubAnswers(async () => {
-    modelCalls += 1;
-    return { source: "Acme FAQ", answer: "anyone can join, no team needed" };
-  });
+test("a validated answer is one Slack call, with no placeholder", async () => {
+  await withHelpProgram(
+    { id: "instant-answer", channels: ["C-instant-main"], mainChannel: "C-instant-main" },
+    async (_programId: string) => {
+      const client = fakeClient();
+      let modelCalls = 0;
+      const restoreAnswers = stubAnswers(async () => {
+        modelCalls += 1;
+        return { source: "Acme FAQ", answer: "anyone can join, no team needed" };
+      });
 
-  try {
-    const ask = (threadTs: string, question: string) =>
-      respond.respond({ client, channel: "C1", threadTs, userId: `U-${threadTs}`, question, mode: respond.ALWAYS });
-
-    await ask("t-instant-a", "who can join acme");
-    assert.equal(modelCalls, 1);
-    const afterFirst = { posts: client.calls.posts.length, updates: client.calls.updates.length };
-
-    await ask("t-instant-b", "who can join acme?");
-    assert.equal(modelCalls, 1, "the second ask must not reach the model");
-    assert.equal(client.calls.posts.length, afterFirst.posts + 1, "exactly one new message");
-    assert.equal(client.calls.updates.length, afterFirst.updates, "and no edit of it afterwards");
-    assert.equal(client.calls.posts.at(-1), "anyone can join, no team needed");
-  } finally {
-    restoreAnswers();
-  }
+      try {
+        await respond.respond({
+          client,
+          channel: "C-instant-main",
+          threadTs: "t-instant-a",
+          userId: "U-instant",
+          question: "who can join acme",
+          mode: respond.ALWAYS,
+        });
+        assert.equal(modelCalls, 1);
+        assert.equal(client.calls.posts.length, 1);
+        assert.equal(client.calls.updates.length, 0);
+        assert.equal(client.calls.posts.at(-1), "anyone can join, no team needed");
+      } finally {
+        restoreAnswers();
+      }
+    },
+  );
 });
 
 test("the instant path still respects the gate", async () => {
@@ -1218,16 +1208,44 @@ test("isGroundedAnswer correctly identifies grounded vs ungrounded answers", () 
   assert.equal(isGroundedAnswer({ source: "Program catalog", answer: "you should check the site" }), false);
   assert.equal(isGroundedAnswer({ source: "Program FAQ", answer: "suggest asking in the help channel" }), false);
   assert.equal(
-    isGroundedAnswer({
-      source: "Live FAQ",
-      answer: "Every hour of work submitted adds 20 minutes to the livestream timer.",
-    }),
+    isGroundedAnswer(
+      {
+        source: "Live FAQ",
+        answer: "Every hour of work submitted adds 20 minutes to the livestream timer.",
+        passageCitations: ["p1"],
+        citationEvidence: [
+          {
+            id: "p1",
+            source: "Live FAQ",
+            text: "Every hour of work submitted adds 20 minutes to the livestream timer.",
+            programId: "live",
+          },
+        ],
+      },
+      { id: "live" },
+    ),
     true,
   );
   assert.equal(
-    isGroundedAnswer({ source: "Live FAQ", answer: "Projects started or recorded before Live began are allowed." }),
+    isGroundedAnswer(
+      {
+        source: "Live FAQ",
+        answer: "Projects started or recorded before Live began are allowed.",
+        passageCitations: ["p1"],
+        citationEvidence: [
+          {
+            id: "p1",
+            source: "Live FAQ",
+            text: "Projects started or recorded before Live began are allowed.",
+            programId: "live",
+          },
+        ],
+      },
+      { id: "live" },
+    ),
     true,
   );
+  assert.equal(isGroundedAnswer({ source: "Live FAQ", answer: "uncited source answer" }, { id: "live" }), false);
 });
 
 test("stripChannelMentions removes Slack channel tags and links", () => {
@@ -1663,7 +1681,19 @@ test("grounded HELP_ONLY support still answers when tickets are disabled", async
       const client = richClient();
       const originalLookup = lookup.answerOrChat;
       const originalIntent = intent.classifyIntent;
-      lookup.answerOrChat = async () => ({ source: "Docs", answer: "export as PNG at native size" });
+      lookup.answerOrChat = async () => ({
+        source: "Docs",
+        answer: "export as PNG at native size <https://docs.example/export|Docs — Exporting>",
+        passageCitations: ["p1"],
+        citationEvidence: [
+          {
+            id: "p1",
+            programId,
+            source: "Docs",
+            text: "Export as PNG at native size.",
+          },
+        ],
+      });
       intent.classifyIntent = async () => intent.HELP_NEEDED;
       try {
         const handled = await respond.respond({
@@ -2568,7 +2598,19 @@ test("cache serves a grounded answer in help even when the classifier failed", a
   await withHelpProgram({ id: "charcache" }, async (programId: string, channel: string) => {
     const originalIntent = intent.classifyIntent;
     const originalKnown = lookup.knownAnswer;
-    lookup.knownAnswer = () => ({ source: "Docs", answer: "cached answer here" });
+    lookup.knownAnswer = () => ({
+      source: "Docs",
+      answer: "cached answer here <https://docs.example/page|Docs — Getting started>",
+      passageCitations: ["p1"],
+      citationEvidence: [
+        {
+          id: "p1",
+          programId,
+          source: "Docs",
+          text: "cached answer here",
+        },
+      ],
+    });
     intent.classifyIntent = async () => null;
     try {
       const client = richClient();
@@ -2597,9 +2639,15 @@ test("active incidents bypass cache and model work, stay tenant-scoped, and stop
   const originalStream = answer.getAnswerOrChatStream;
   let cacheCalls = 0;
   let modelCalls = 0;
-  lookup.knownAnswer = () => {
+  lookup.knownAnswer = ({ program }: { program?: { id?: string } }) => {
     cacheCalls += 1;
-    return { source: "Docs", answer: "cached answer" };
+    const programId = program?.id || "";
+    return {
+      source: "Docs",
+      answer: "cached answer <https://docs.example/cached|Docs — FAQ>",
+      passageCitations: ["p1"],
+      citationEvidence: [{ id: "p1", source: "Docs", text: "cached answer", programId }],
+    };
   };
   answer.getAnswerOrChat = async () => {
     modelCalls += 1;

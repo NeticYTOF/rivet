@@ -26,6 +26,9 @@ interface AnswerResult {
   groundingVerdict?: unknown;
   evidence?: unknown[];
   fixtureClaims?: unknown[];
+  unresolved?: string[];
+  citationEvidence?: unknown[];
+  passageCitations?: unknown[];
 }
 interface AnswerOptions {
   onText?: ((text: string) => void) | null;
@@ -35,6 +38,7 @@ interface AnswerOptions {
   allowWebSearch?: boolean;
   isPing?: boolean;
   skipCache?: boolean;
+  previousQuestion?: string | null;
 }
 interface WebResult {
   title?: string;
@@ -76,6 +80,8 @@ function cacheHit(question: string, contextPrompt: string, programId: string | n
     log.debug("grounding", `bypassing cache entry from stale dynamic source "${citedSource.name}"`);
     return null;
   }
+  // shortcut: cached doc answers lack passage evidence, re-enable when the cache stores citation IDs.
+  if (hit.source) return null;
   log.debug("respond", "cache hit");
   db.recordMetric("cache_hit");
   return hit;
@@ -91,7 +97,6 @@ function dateFallback(question: string, contextPrompt: string, prog: ProgramLike
     : programs.shared().milestones;
 
   const direct = program.directAnswer(question, new Date(), milestones, record);
-  if (direct && !contextPrompt) cache.put(question, direct, programId);
   return direct;
 }
 
@@ -157,7 +162,7 @@ function isAuthoritativeOnlyTopic(question: string, result: AnswerResult | null)
 }
 
 const NUMERIC_CLAIM_RE =
-  /\$\s?\d[\d,.]*|\b\d[\d,.]*\s?%|\b\d[\d,.]*\s?(?:percent|px|pixels?|hours?|hrs?|days?|weeks?|months?|dollars?)\b/gi;
+  /\$\s?\d[\d,.]*|\b\d[\d,.]*\s?%|\b\d[\d,.]*\s?(?:percent|px|pixels?|hours?|hrs?|days?|weeks?|months?|dollars?|points?|bolts?|xp)\b/gi;
 
 function normalizeForMatch(text: string) {
   return String(text || "")
@@ -173,10 +178,207 @@ function numericClaimsGrounded(answerText: string, corpusText: string) {
   return claims.every((claim) => corpusNorm.includes(normalizeForMatch(claim)));
 }
 
+function evidencePrompt(passages: Array<{ id: string; source: string; heading?: string; text: string }>) {
+  return passages
+    .map(
+      ({ source, heading, text }, index) => `### ${source} [E${index + 1}]${heading ? ` — ${heading}` : ""}\n${text}`,
+    )
+    .join("\n\n");
+}
+
+function citationLabel(passage: { source: string; heading?: string }, url: string | null) {
+  const label = `${passage.source}${passage.heading ? ` — ${passage.heading}` : ""}`
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  if (!url) return `[${label}]`;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return `[${label}]`;
+    return `<${parsed.href}|${label}>`;
+  } catch (_error: unknown) {
+    return `[${label}]`;
+  }
+}
+
+async function applyPassageCitations(
+  result: AnswerResult | null,
+  passages: Array<{
+    id: string;
+    source: string;
+    heading?: string;
+    text: string;
+    programId?: string | null;
+    kind?: string;
+  }>,
+  prog: ProgramLike | string | null,
+  question = "",
+  contextQuestion: string | null = null,
+) {
+  if (!result?.source || result.source.trim().toUpperCase() === "NONE") return result;
+  const programId = idOf(prog);
+  if (!programId) return null;
+  const sources = programSources(prog);
+  const eligible = new Map<string, (typeof passages)[number]>();
+  const aliases = new Map<string, string>();
+  const ids = new Map<string, string>();
+  for (const [index, passage] of passages.entries()) {
+    if (!passage.id || passage.programId !== programId) continue;
+    const configured = sources.find((source) => source.name?.toLowerCase() === passage.source.toLowerCase());
+    if (passage.kind === "source" && !configured) continue;
+    if (configured?.hidden) continue;
+    if (configured) {
+      const freshness = knowledge.sourceEligibility(configured);
+      if (!(freshness.exactClaimsAllowed || (freshness.authority !== "dynamic" && passage.kind === "source"))) continue;
+    } else if (passage.kind !== "generated") {
+      continue;
+    }
+    eligible.set(passage.id, passage);
+    aliases.set(`E${index + 1}`, passage.id);
+    ids.set(passage.id, `E${index + 1}`);
+  }
+  const answerText = String(result.answer || "");
+  const refs = [...answerText.matchAll(/\[(E\d+)\]/g)];
+  for (const match of refs) {
+    const alias = match[1];
+    const id = aliases.get(alias);
+    if (!id) return null;
+  }
+  const sentenceParts = answerText.split(/(?<=[.!?])\s+(?!\[E\d+\])|\n+/).filter(Boolean);
+  const claims = sentenceParts.map((sentence) => {
+    const claim = sentence
+      .replace(/\[E\d+\]/g, "")
+      .trim()
+      .replace(/\s+([.,!?;:])/g, "$1");
+    const citedIds = [...sentence.matchAll(/\[(E\d+)\]/g)].map((match) => aliases.get(match[1]) || "");
+    return { claim, supported: true, evidenceIds: [...new Set(citedIds)] };
+  });
+  if (!claims.length || claims.some(({ claim }) => !claim)) return null;
+
+  const verificationEvidence = [...eligible.values()].map((passage) => ({ ...passage, programId }));
+  const expectedClaims = claims.map(({ claim, evidenceIds }) => ({ claim, evidenceIds }));
+  const needsCoverage = Boolean(question || result.unresolved?.length);
+  const verdict = await answer.verifyGrounding(expectedClaims, verificationEvidence, prog, null, {
+    ...(needsCoverage ? { requestCoverage: { question, contextQuestion, unresolved: result.unresolved || [] } } : {}),
+  });
+  const verified = grounding.parseGroundingVerdict(verdict);
+  if (
+    !verified.ok ||
+    verified.claims.length !== expectedClaims.length ||
+    verified.claims.some(
+      (claim, index) =>
+        claim.claim.trim().replace(/\s+/g, " ").toLowerCase() !== expectedClaims[index].claim.toLowerCase(),
+    )
+  )
+    return null;
+  const supportedIndexes = verified.claims.flatMap((claim, index) => (claim.supported ? [index] : []));
+  if (!supportedIndexes.length || (supportedIndexes.length !== verified.claims.length && !result.unresolved?.length))
+    return null;
+  const supportedClaims = supportedIndexes.map((index) => verified.claims[index]);
+  const supportedExpectedClaims = supportedIndexes.map((index) => expectedClaims[index]);
+  const checkedClaims = grounding.validatePassageClaims({
+    verdict: { ...verified, verdict: "supported", claims: supportedClaims },
+    expectedClaims: supportedExpectedClaims,
+    evidence: verificationEvidence,
+    programId,
+  });
+  if (!checkedClaims.supported) return null;
+  if (needsCoverage) {
+    let coverage = verified.coverage === true;
+    if (supportedIndexes.length !== verified.claims.length) {
+      const coverageVerdict = grounding.parseGroundingVerdict(
+        await answer.verifyGrounding(supportedExpectedClaims, verificationEvidence, prog, null, {
+          requestCoverage: { question, contextQuestion, unresolved: result.unresolved || [] },
+        }),
+      );
+      coverage = Boolean(
+        coverageVerdict.ok &&
+        coverageVerdict.coverage === true &&
+        coverageVerdict.claims.length === supportedExpectedClaims.length &&
+        coverageVerdict.claims.every(
+          (claim, index) =>
+            claim.supported &&
+            claim.claim.trim().replace(/\s+/g, " ").toLowerCase() ===
+              supportedExpectedClaims[index].claim.toLowerCase(),
+        ) &&
+        grounding.validatePassageClaims({
+          verdict: { ...coverageVerdict, verdict: "supported" },
+          expectedClaims: supportedExpectedClaims,
+          evidence: verificationEvidence,
+          programId,
+        }).supported,
+      );
+    }
+    if (!coverage) {
+      log.debug("grounding", "answer did not cover the current question and unresolved parts");
+      return null;
+    }
+  }
+  const supportedSentences = supportedIndexes.map((index) => sentenceParts[index]);
+  const usedIds = new Set(supportedClaims.flatMap((claim) => claim.evidenceIds));
+  const validity = grounding.validatePassageCitations({
+    citations: [...usedIds],
+    evidence: verificationEvidence,
+    programId,
+  });
+  if (!validity.supported) return null;
+  const cited = new Map([...usedIds].map((id) => [String(id), eligible.get(String(id))!]));
+  const sourceLabels = supportedClaims.map((claim) =>
+    claim.evidenceIds.map((id) => {
+      const passage = eligible.get(id)!;
+      const configured = sources.find((source) => source.name?.toLowerCase() === passage.source.toLowerCase());
+      const sourceUrl =
+        configured?.siteUrl || (configured?.url && /^https?:\/\//i.test(configured.url) ? configured.url : null);
+      return citationLabel(passage, sourceUrl);
+    }),
+  );
+  result.answer = supportedSentences
+    .map((sentence, index) => {
+      const claim = claims[supportedIndexes[index]].claim;
+      if (
+        !numericClaimsGrounded(claim, supportedClaims[index].evidenceIds.map((id) => eligible.get(id)!.text).join("\n"))
+      )
+        return "";
+      return `${claim} ${sourceLabels[index].join(" ")}`;
+    })
+    .join(" ");
+  if (!result.answer) return null;
+  result.source = cited.values().next().value?.source || result.source;
+  result.citationEvidence = [...cited.values()];
+  result.passageCitations = [...cited.keys()];
+  if (result.unresolved?.length) {
+    result.answer += `\n\nI couldn't confirm ${result.unresolved.join("; ")} in the docs, so I can't answer those parts.`;
+  }
+  return result;
+}
+
+async function citeTimelineFallback(
+  result: AnswerResult | null,
+  passages: Parameters<typeof applyPassageCitations>[1],
+  prog: ProgramLike | string | null,
+  question = "",
+  contextQuestion: string | null = null,
+) {
+  if (!result?.source || result.source !== "Program timeline") return result;
+  const index = passages.findIndex((passage) => passage.source === "Program timeline");
+  if (index < 0) return null;
+  result.answer = `${result.answer || ""} [E${index + 1}]`;
+  return await applyPassageCitations(result, passages, prog, question, contextQuestion);
+}
+
 function exactClaimAllowed(result: AnswerResult | null, prog: ProgramLike | string | null, question = "", corpus = "") {
   if (!result) return false;
   prog = typeof prog === "string" ? programs.get(prog) : prog;
   let structuredSupport = false;
+  if (result.passageCitations || result.citationEvidence) {
+    const checked = grounding.validatePassageCitations({
+      citations: result.passageCitations,
+      evidence: result.citationEvidence,
+      programId: idOf(prog) || "",
+    });
+    if (!checked.supported) return false;
+    structuredSupport = true;
+  }
   if (result.groundingVerdict || result.evidence) {
     const programId = idOf(prog);
     if (!programId) return false;
@@ -264,16 +466,18 @@ async function lookupAnswer(
   if (staged) return staged;
 
   const query = retrievalQuery(question, contextPrompt, prog);
-  const corpus = knowledge.getContext(query, programId);
+  const { passages } = knowledge.getEvidenceContext(query, programId);
+  const corpus = evidencePrompt(passages);
   let result = await answer.getGroundedAnswer(question, corpus, contextPrompt, prog, channel, { isPing });
   if (result) {
+    result = await applyPassageCitations(result, passages, prog, question);
     result = applyGroundingBoundary(result, prog, question, corpus);
   }
   if (result) {
-    if (!contextPrompt) cache.put(question, result, cacheScope(prog));
+    if (!contextPrompt && !result.citationEvidence) cache.put(question, result, cacheScope(prog));
     return result;
   }
-  return dateFallback(question, contextPrompt, prog);
+  return citeTimelineFallback(dateFallback(question, contextPrompt, prog), passages, prog, question);
 }
 
 async function answerOrChat(
@@ -287,38 +491,54 @@ async function answerOrChat(
     allowWebSearch = false,
     isPing = false,
     skipCache = false,
+    previousQuestion = null,
   }: AnswerOptions = {},
 ) {
   const programId = idOf(prog);
-  const hit = cacheHit(question, contextPrompt, cacheScope(prog), skipCache);
+  const hit = previousQuestion ? null : cacheHit(question, contextPrompt, cacheScope(prog), skipCache);
   if (hit) return hit;
 
   const staged = await runCodeStages(question);
   if (staged) return staged;
 
-  const query = retrievalQuery(question, contextPrompt, prog);
-  const corpus = knowledge.getContext(query, programId);
-  let result = onText
-    ? await answer.getAnswerOrChatStream(question, corpus, contextPrompt, {
-        onText,
-        inHelpChannel,
-        program: prog,
-        channel,
-        isPing,
-      })
-    : await answer.getAnswerOrChat(question, corpus, contextPrompt, inHelpChannel, prog, channel, { isPing });
+  const query = previousQuestion
+    ? retrievalQuery(question, `User: ${previousQuestion}`, prog)
+    : retrievalQuery(question, contextPrompt, prog);
+  const { passages } = knowledge.getEvidenceContext(query, programId);
+  const corpus = evidencePrompt(passages);
+  let result =
+    onText && passages.length === 0
+      ? await answer.getAnswerOrChatStream(question, corpus, contextPrompt, {
+          onText,
+          inHelpChannel,
+          program: prog,
+          channel,
+          isPing,
+        })
+      : await answer.getAnswerOrChat(question, corpus, contextPrompt, inHelpChannel, prog, channel, { isPing });
 
   if (!result?.source) {
     const direct = dateFallback(question, contextPrompt, prog);
-    if (direct) return direct;
+    if (direct) return await citeTimelineFallback(direct, passages, prog, question);
 
     result =
-      (await webFallback({ question, contextPrompt, corpus, prog, channel, isPing, inHelpChannel, allowWebSearch })) ||
-      result;
+      (await webFallback({
+        question,
+        contextPrompt,
+        corpus,
+        passages,
+        prog,
+        channel,
+        isPing,
+        inHelpChannel,
+        allowWebSearch,
+      })) || result;
   }
 
+  result = await applyPassageCitations(result, passages, prog, question, previousQuestion);
   result = applyGroundingBoundary(result, prog, question, corpus);
-  if (result?.source && !contextPrompt) cache.put(question, result, cacheScope(prog));
+  if (result?.source && !contextPrompt && !previousQuestion && !result.citationEvidence)
+    cache.put(question, result, cacheScope(prog));
   return result;
 }
 
@@ -326,6 +546,7 @@ async function webFallback({
   question,
   contextPrompt,
   corpus,
+  passages,
   prog,
   channel,
   isPing,
@@ -335,6 +556,14 @@ async function webFallback({
   question: string;
   contextPrompt: string;
   corpus: string;
+  passages: Array<{
+    id: string;
+    source: string;
+    heading?: string;
+    text: string;
+    programId?: string | null;
+    kind?: string;
+  }>;
   prog: ProgramLike | string | null;
   channel: string | null;
   isPing: boolean;
@@ -346,9 +575,10 @@ async function webFallback({
   if (!webResults || webResults.length === 0) return null;
   const webSnippet = webResults.map((r: WebResult) => `Title: ${r.title}\nURL: ${r.url}\n${r.markdown}`).join("\n\n");
   const webContextPrompt = `${contextPrompt}\n\n=== WEB RESEARCH ===\n${webSnippet}`;
-  return answer
+  const result = await answer
     .getGroundedAnswer(question, corpus, webContextPrompt, prog, channel, { isPing, inHelpChannel })
     .catch(() => null);
+  return await applyPassageCitations(result, passages, prog, question);
 }
 
 interface KnownAnswerOptions {
@@ -376,6 +606,8 @@ export = {
   knownAnswer,
   exactClaimAllowed,
   applyGroundingBoundary,
+  applyPassageCitations,
+  citeTimelineFallback,
   isAuthoritativeOnlyTopic,
   numericClaimsGrounded,
 };

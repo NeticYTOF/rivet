@@ -334,6 +334,8 @@ test("program source corpora remain isolated", async () => {
     await knowledge.refreshSource(programs.get("beta").sources[0], true);
     assert.match(knowledge.getContext("acme facts", "acme"), /acme-only/);
     assert.doesNotMatch(knowledge.getContext("acme facts", "beta"), /acme-only/);
+    assert.match(knowledge.getEvidenceContext("acme facts", "acme").context, /acme-only/);
+    assert.doesNotMatch(knowledge.getEvidenceContext("acme facts", "beta").context, /acme-only/);
   } finally {
     if (saved === undefined) delete process.env.RIVET_PROGRAMS_JSON;
     else process.env.RIVET_PROGRAMS_JSON = saved;
@@ -375,18 +377,14 @@ test("program invalidation drops cached source-section views", async () => {
   await knowledge.refreshSource(sourceA, true);
   await knowledge.refreshSource(sourceB, true);
 
-  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
-    { id: "versioned", name: "Versioned", sources: [sourceA] },
-  ]);
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([{ id: "versioned", name: "Versioned", sources: [sourceA] }]);
   programs.invalidate();
   knowledge.invalidate();
 
   try {
     assert.match(knowledge.getContext("alpha source", "versioned"), /alpha-source token/);
 
-    process.env.RIVET_PROGRAMS_JSON = JSON.stringify([
-      { id: "versioned", name: "Versioned", sources: [sourceB] },
-    ]);
+    process.env.RIVET_PROGRAMS_JSON = JSON.stringify([{ id: "versioned", name: "Versioned", sources: [sourceB] }]);
     programs.invalidate();
 
     const refreshed = knowledge.getContext("beta source", "versioned");

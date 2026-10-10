@@ -1,4 +1,5 @@
 const lookup = require("./lookup");
+const grounding = require("./grounding");
 const reply = require("./reply");
 const context = require("./context");
 const rateLimit = require("./rateLimit");
@@ -21,6 +22,8 @@ interface AnswerResult {
   answer: string;
   direct?: boolean;
   unclear?: boolean;
+  passageCitations?: string[];
+  citationEvidence?: Array<{ id: string; programId: string; source: string; text: string }>;
 }
 interface UserContext {
   recentTopics?: string[];
@@ -106,6 +109,7 @@ const HELP_ONLY: AnswerMode = "help-only";
 const ALWAYS: AnswerMode = "always";
 
 const MAX_CLARIFY_WORDS = 25;
+const CLARIFICATION_PREFIX = "Quick clarification: ";
 
 const PLACEHOLDER_DELAY_MS = 250;
 
@@ -132,6 +136,55 @@ function isClarifyingQuestion(text: string) {
   return ASKS_WHAT_THEY_MEAN.test(t);
 }
 
+function isSpecificClarification(text: string) {
+  return isClarifyingQuestion(text) && /\bor\b/i.test(text) && !ASKS_WHAT_THEY_MEAN.test(text);
+}
+
+function pendingClarification(
+  messages: ReturnType<typeof context.getThreadMessages>,
+  userId: string,
+  channel: string,
+  workspaceId: string | null,
+) {
+  for (let index = messages.length - 1; index > 0; index -= 1) {
+    const clarification = messages[index];
+    const original = messages[index - 1];
+    if (
+      clarification.speaker !== "rivet" ||
+      !clarification.text.startsWith(CLARIFICATION_PREFIX) ||
+      clarification.channel !== channel ||
+      clarification.workspaceId !== workspaceId ||
+      original.speaker !== "human" ||
+      original.userId !== userId ||
+      original.channel !== channel ||
+      original.workspaceId !== workspaceId ||
+      messages.slice(index + 1).some((message) => message.speaker === "human" && message.userId === userId)
+    )
+      continue;
+    return original.text;
+  }
+  return null;
+}
+
+function previousAnsweredQuestion(
+  messages: ReturnType<typeof context.getThreadMessages>,
+  userId: string,
+  channel: string,
+  workspaceId: string | null,
+) {
+  const answer = messages.at(-1);
+  const question = messages.at(-2);
+  if (
+    answer?.speaker !== "rivet" ||
+    question?.speaker !== "human" ||
+    question.userId !== userId ||
+    question.channel !== channel ||
+    question.workspaceId !== workspaceId
+  )
+    return null;
+  return question.text;
+}
+
 function stripChannelMentions(text: string) {
   if (!text) return "";
   return text
@@ -141,8 +194,17 @@ function stripChannelMentions(text: string) {
     .trim();
 }
 
-function isGroundedAnswer(result: AnswerResult | null) {
+function isGroundedAnswer(result: AnswerResult | null, program: ProgramLike | null = null) {
   if (!result || !result.source || !result.answer) return false;
+  const programId = program?.id || "";
+  if (
+    !grounding.validatePassageCitations({
+      citations: result.passageCitations,
+      evidence: result.citationEvidence,
+      programId,
+    }).supported
+  )
+    return false;
   const source = result.source.trim().toUpperCase();
   if (!source || source === "NONE") return false;
   if (/\b(?:not invent|behavior rule|faq rule|unknown|unconfirmed)\b/i.test(source)) {
@@ -214,7 +276,7 @@ async function replyFromCache({
 }: CacheReplyArgs) {
   const requireGrounded = process.env.RIVET_REQUIRE_GROUNDED_ANSWER === "1" || program?.requireGroundedAnswer;
   if (requireGrounded) {
-    if (!isGroundedAnswer(result)) return false;
+    if (!isGroundedAnswer(result, program)) return false;
     result.answer = stripChannelMentions(result.answer);
   }
 
@@ -627,13 +689,24 @@ async function respond({
 
   const contextStartedAt = Date.now();
   if (seedClient && context.shouldSeedFromSlack(threadTs, messageTs || null)) {
-    await context.seedFromSlack(seedClient, channel, threadTs, config.slack.botUserId, messageTs || threadTs);
+    await context.seedFromSlack(
+      seedClient,
+      channel,
+      threadTs,
+      config.slack.botUserId,
+      messageTs || threadTs,
+      workspaceId,
+    );
   }
 
+  const priorMessages = context.getThreadMessages(threadTs);
+  const pendingQuestion = db.isTakeover(threadTs)
+    ? null
+    : pendingClarification(priorMessages, userId, channel, workspaceId);
   const threadContext = context.getThreadContext(threadTs, trimmed);
   trace.set({ contextMs: Date.now() - contextStartedAt });
 
-  context.addToThread(threadTs, "user", trimmed, userId, channel);
+  context.addToThread(threadTs, "user", trimmed, userId, channel, workspaceId);
 
   // classify() is handed this thread as CONTEXT. The message under judgement
   // was just added to the thread above, so the classifier saw its own question
@@ -649,7 +722,7 @@ async function respond({
   if (await handleMute({ client, channel, threadTs, question: trimmed, program: prog, workspaceId })) return true;
 
   const REFERENTIAL_QUERY = /^(?:\^+|above|see above|this|what about (?:this|that)|answer this|look above)\s*$/i;
-  let effectiveQuestion = trimmed;
+  let effectiveQuestion = pendingQuestion ? `${pendingQuestion}\nClarification: ${trimmed}` : trimmed;
   if (REFERENTIAL_QUERY.test(trimmed) && threadTs) {
     const messages = context.getThreadMessages(threadTs);
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -668,8 +741,7 @@ async function respond({
     return true;
   }
 
-  const prefetchedUrl =
-    isAddressed && settings?.generalMentionChat !== false ? link.extractUrl(trimmed) : null;
+  const prefetchedUrl = isAddressed && settings?.generalMentionChat !== false ? link.extractUrl(trimmed) : null;
   const linkStartedAt = prefetchedUrl ? Date.now() : null;
   const prefetchedLink = prefetchedUrl
     ? link.fetchUrlContent(prefetchedUrl).catch((error: unknown) => ({ error: true, message: errorMessage(error) }))
@@ -708,6 +780,13 @@ async function respond({
     return false;
   }
   const kind = plan.kind;
+  const previousQuestion =
+    kind === "program" &&
+    !pendingQuestion &&
+    !db.isTakeover(threadTs) &&
+    /^(?:and\s+)?(?:what|how)\s+about\b/i.test(trimmed)
+      ? previousAnsweredQuestion(priorMessages, userId, channel, workspaceId)
+      : null;
 
   const tickets = require("./tickets");
   const requireGrounded = process.env.RIVET_REQUIRE_GROUNDED_ANSWER === "1" || prog?.requireGroundedAnswer;
@@ -784,7 +863,7 @@ async function respond({
     program: prog,
     skipCache: requireGrounded,
   });
-  if (known && (kind === "general" || isDeterministicAnswer(known) || isGroundedAnswer(known))) {
+  if (known && (kind === "general" || isDeterministicAnswer(known) || isGroundedAnswer(known, prog))) {
     const spoke = await replyFromCache({
       client,
       channel,
@@ -894,6 +973,7 @@ async function respond({
       allowWebSearch: isAddressed && kind === "general",
       isPing: isAddressed,
       skipCache: requireGrounded,
+      previousQuestion,
     });
   } catch (error: unknown) {
     if (placeholderTimer) {
@@ -947,7 +1027,10 @@ async function respond({
 
   result ??= { source: null, answer: "" };
   const cannotTell = result?.unclear === true || result?.answer?.trim()?.toUpperCase() === UNCLEAR_MARKER;
-  const grounded = !cannotTell && (isDeterministicAnswer(result) || isGroundedAnswer(result));
+  const grounded =
+    !cannotTell &&
+    !isClarifyingQuestion(result.answer) &&
+    (isDeterministicAnswer(result) || isGroundedAnswer(result, prog));
   if (grounded && requireGrounded) result.answer = stripChannelMentions(result.answer);
   trace.set({
     retrievalHit: Boolean(result?.source && result.source.trim().toUpperCase() !== "NONE"),
@@ -976,6 +1059,37 @@ async function respond({
       await reply.flagForHumans(client, channel, threadTs, trimmed, userId, workspaceId);
     db.recordMetric("silent", Date.now() - startedAt, "shadow_mode", programId);
     trace.finish({ finalAction: "silence", reason: "shadow_mode" });
+    return true;
+  }
+
+  const pointClarification =
+    !pendingQuestion &&
+    !inHelpChannel &&
+    programId === "loadout" &&
+    !grounded &&
+    /\bpoints?\b/i.test(trimmed) &&
+    !/\bbolts?\b|\btrack\s*xp\b/i.test(trimmed)
+      ? "Do you mean Bolts (spendable currency) or Track XP (permanent progress)?"
+      : null;
+  const clarification =
+    pointClarification ||
+    (isGroundedAnswer(result, prog) && isSpecificClarification(result.answer) ? result.answer.trim() : null);
+  if (!pendingQuestion && !inHelpChannel && kind === "program" && clarification) {
+    const text = `${CLARIFICATION_PREFIX}${clarification}`;
+    await waitForSeed();
+    await publishReply({
+      silencedBefore,
+      client,
+      channel,
+      threadTs,
+      placeholder: placeholder(),
+      text: reply.withReplySignature(text, prog),
+      program: prog,
+      seededTs,
+    });
+    context.addToThread(threadTs, "assistant", text, null, channel, workspaceId);
+    db.recordMetric("fallback", Date.now() - startedAt, "clarification", programId);
+    trace.finish({ finalAction: "reply", reason: "clarification" });
     return true;
   }
 

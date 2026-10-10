@@ -1156,7 +1156,7 @@ async function internalTestQuestion(programId: string, body: TestQuestionBody = 
   }
   let grounded = false;
   try {
-    grounded = require("../respond").isGroundedAnswer(result);
+    grounded = require("../respond").isGroundedAnswer(result, program);
   } catch (_) {
     grounded = false;
   }

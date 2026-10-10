@@ -14,6 +14,8 @@ interface ProgramRef extends Pick<Program, "id"> {}
 interface AnswerResult {
   source: string | null;
   answer: string | null;
+  passageCitations?: unknown[];
+  citationEvidence?: unknown[];
 }
 interface TranscriptMessage {
   role?: string;
@@ -103,8 +105,8 @@ function auditCopilot(
   audit.record({ programId, actorId, action: `copilot.${action}`, entityType: "copilot", entityId: null, metadata });
 }
 
-function draftVerdict(result: AnswerResult | null): CopilotResponse {
-  const grounded = respond.isGroundedAnswer(result);
+function draftVerdict(result: AnswerResult | null, program: ProgramRef | null): CopilotResponse {
+  const grounded = respond.isGroundedAnswer(result, program);
   return {
     draft: result && result.answer ? result.answer : null,
     source: (result && result.source) || null,
@@ -137,7 +139,7 @@ async function draftReply({
 }): Promise<CopilotResponse> {
   const programId = program ? program.id : null;
   const result = await lookup.answerOrChat(question, threadContextFor(threadTs), { program });
-  return { ...draftVerdict(result), programId };
+  return { ...draftVerdict(result, program), programId };
 }
 
 async function ask({
@@ -150,7 +152,7 @@ async function ask({
   threadTs?: string | null;
 }): Promise<CopilotResponse> {
   const result = await lookup.answerOrChat(question, threadContextFor(threadTs), { program });
-  return { ...draftVerdict(result), programId: program ? program.id : null };
+  return { ...draftVerdict(result, program), programId: program ? program.id : null };
 }
 
 async function completeHelper(prompt: string, maxTokens = 600): Promise<string> {

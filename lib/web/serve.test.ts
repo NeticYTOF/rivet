@@ -301,7 +301,19 @@ test("POST /internal/v1/programs/:id/test-question proxies the probe; unknown pr
     const origContext = knowledge.getContext;
     const origLookup = lookup.lookupAnswer;
     knowledge.getContext = () => "### Probe Docs\nProbe answer text.";
-    lookup.lookupAnswer = async () => ({ source: "Probe Docs", answer: "Probe answer text." });
+    lookup.lookupAnswer = async () => ({
+      source: "Probe Docs",
+      answer: "Probe answer text.",
+      passageCitations: ["p1"],
+      citationEvidence: [
+        {
+          id: "p1",
+          programId: "dash-serve-probe",
+          source: "Probe Docs",
+          text: "Probe answer text.",
+        },
+      ],
+    });
     try {
       const res = await serve.handleRequest(
         new Request("http://localhost/internal/v1/programs/dash-serve-probe/test-question", {

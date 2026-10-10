@@ -10,6 +10,7 @@ interface ParsedVerdict {
   verdict: string;
   claims: GroundingClaim[];
   errors: string[];
+  coverage?: boolean;
 }
 interface EvidenceRecord extends JsonRecord {
   id?: unknown;
@@ -24,6 +25,17 @@ interface ValidateOptions {
   programId?: string;
   fixtureClaims?: unknown[];
   parse?: (raw: unknown) => ParsedVerdict;
+}
+interface PassageCitationOptions {
+  citations?: unknown[];
+  evidence?: EvidenceRecord[];
+  programId?: string;
+}
+interface PassageClaimOptions {
+  verdict?: unknown;
+  expectedClaims?: Array<{ claim: string; evidenceIds: string[] }>;
+  evidence?: EvidenceRecord[];
+  programId?: string;
 }
 
 function fail(errors: string[]): ParsedVerdict {
@@ -92,19 +104,27 @@ function parseGroundingVerdict(raw: unknown): ParsedVerdict {
     const claimRecord = item as JsonRecord;
     const claim = asString(claimRecord.claim);
     if (!claim) return fail([`claims[${index}].claim must be a non-empty string`]);
-    if (typeof claimRecord.supported !== "boolean") return fail([`claims[${index}].supported must be boolean`]);
-    if (!Array.isArray(claimRecord.evidenceIds) || claimRecord.evidenceIds.some((id) => !asString(id))) {
+    const evidenceIds = claimRecord.evidenceIds ?? claimRecord.passageIDs;
+    if (typeof claimRecord.supported !== "boolean" && record.verdict !== "supported")
+      return fail([`claims[${index}].supported must be boolean`]);
+    if (!Array.isArray(evidenceIds) || evidenceIds.some((id) => !asString(id))) {
       return fail([`claims[${index}].evidenceIds must be an array of strings`]);
     }
-    if (claimRecord.supported && claimRecord.evidenceIds.length === 0)
-      return fail([`claims[${index}] supported claims need evidenceIds`]);
+    const supported = typeof claimRecord.supported === "boolean" ? claimRecord.supported : true;
+    if (supported && evidenceIds.length === 0) return fail([`claims[${index}] supported claims need evidenceIds`]);
     claims.push({
       claim,
-      supported: claimRecord.supported,
-      evidenceIds: claimRecord.evidenceIds.map((id) => asString(id)),
+      supported,
+      evidenceIds: evidenceIds.map((id) => asString(id)),
     });
   }
-  return { ok: true, verdict: record.verdict, claims, errors: [] };
+  return {
+    ok: true,
+    verdict: record.verdict,
+    claims,
+    errors: [],
+    ...(typeof record.coverage === "boolean" ? { coverage: record.coverage } : {}),
+  };
 }
 
 function claimKey(value: unknown) {
@@ -153,6 +173,59 @@ function validateClaimSupport({
   return { ok: true, supported, verdict: supported ? "supported" : "unsupported", claims: results, errors: [] };
 }
 
+function validatePassageCitations({ citations = [], evidence = [], programId }: PassageCitationOptions = {}) {
+  if (!asString(programId) || !Array.isArray(citations) || !Array.isArray(evidence)) {
+    return { ok: false, supported: false, errors: ["citations, evidence, and programId are required"] };
+  }
+  const byId = new Map(evidence.map((item) => [asString(item && item.id), item]));
+  const supported =
+    citations.length > 0 &&
+    citations.every((id) => {
+      const passage = byId.get(asString(id));
+      return Boolean(passage && evidenceProgramId(passage) === programId);
+    });
+  return {
+    ok: true,
+    supported,
+    errors: supported ? [] : ["every citation must reference a passage for the same program"],
+  };
+}
+
+function validatePassageClaims({ verdict, expectedClaims = [], evidence = [], programId }: PassageClaimOptions = {}) {
+  const parsed = parseGroundingVerdict(verdict);
+  if (!parsed.ok || parsed.verdict !== "supported" || !asString(programId)) {
+    return {
+      ok: false,
+      supported: false,
+      errors: parsed.errors.length ? parsed.errors : ["supported verdict and programId are required"],
+    };
+  }
+  if (!Array.isArray(expectedClaims) || !Array.isArray(evidence) || parsed.claims.length !== expectedClaims.length) {
+    return { ok: false, supported: false, errors: ["verified claims must match the answer claims"] };
+  }
+  const evidenceIds = new Set(
+    evidence.filter((item) => evidenceProgramId(item) === programId).map((item) => asString(item.id)),
+  );
+  const claimsSupported = expectedClaims.every((expected, index) => {
+    const claim = parsed.claims[index];
+    const expectedIds = [...new Set(expected.evidenceIds.map(asString))].sort();
+    const actualIds = [...new Set((claim?.evidenceIds || []).map(asString))].sort();
+    return Boolean(
+      claim?.supported &&
+      claimKey(claim.claim) === claimKey(expected.claim) &&
+      actualIds.length > 0 &&
+      actualIds.every((id) => evidenceIds.has(id)) &&
+      (expectedIds.length === 0 ||
+        (expectedIds.length === actualIds.length && expectedIds.every((id, index) => id === actualIds[index]))),
+    );
+  });
+  return {
+    ok: true,
+    supported: claimsSupported,
+    errors: claimsSupported ? [] : ["a claim lacks supported same-program passage evidence"],
+  };
+}
+
 function createGroundingValidator({ parse = parseGroundingVerdict }: { parse?: (raw: unknown) => ParsedVerdict } = {}) {
   if (typeof parse !== "function") throw new TypeError("parse must be a function");
   return {
@@ -163,4 +236,11 @@ function createGroundingValidator({ parse = parseGroundingVerdict }: { parse?: (
   };
 }
 
-export = { decodeJson, parseGroundingVerdict, validateClaimSupport, createGroundingValidator };
+export = {
+  decodeJson,
+  parseGroundingVerdict,
+  validateClaimSupport,
+  validatePassageCitations,
+  validatePassageClaims,
+  createGroundingValidator,
+};

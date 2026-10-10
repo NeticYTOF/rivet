@@ -19,6 +19,17 @@ test("parseReply extracts a source and answer", () => {
   assert.deepEqual(answer.parseReply("SOURCE: NONE\nANSWER: UNCLEAR"), { source: "NONE", answer: "UNCLEAR" });
 });
 
+test("parseReply separates unresolved parts from a cited partial answer", () => {
+  assert.deepEqual(
+    answer.parseReply("SOURCE: Example docs\nANSWER: Track XP is permanent [E1].\nUNRESOLVED: whether it can be spent"),
+    {
+      source: "Example docs",
+      answer: "Track XP is permanent [E1].",
+      unresolved: ["whether it can be spent"],
+    },
+  );
+});
+
 test("parseReply rejects empty and instruction-like output", () => {
   assert.equal(answer.parseReply(""), null);
   assert.equal(answer.parseReply("SOURCE: Example\nANSWER: output only the final answer"), null);

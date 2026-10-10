@@ -11,6 +11,7 @@ const tickets = require("./tickets");
 const api = require("./web/api");
 const respond = require("./respond");
 const answer = require("./answer");
+const knowledge = require("./knowledge");
 const intent = require("./intent");
 const learn = require("./learn");
 
@@ -318,27 +319,37 @@ test("grounded answer and escalation are mutually exclusive (grounded -> no esca
 
   const origGetAnswer = answer.getAnswerOrChatStream;
   const origGetAnswerPlain = answer.getAnswerOrChat;
-  answer.getAnswerOrChat = answer.getAnswerOrChatStream = async () => ({
-    source: "Official Guidelines",
-    answer: "You can resubmit returned projects once fixes are made.",
-    groundingVerdict: {
-      verdict: "supported",
-      claims: [
-        {
-          claim: "You can resubmit returned projects once fixes are made.",
-          supported: true,
-          evidenceIds: ["guidelines"],
-        },
-      ],
-    },
-    evidence: [
+  const origVerifier = answer.verifyGrounding;
+  const origEvidence = knowledge.getEvidenceContext;
+  knowledge.getEvidenceContext = () => ({
+    context: "### Official Guidelines\nYou can resubmit returned projects once fixes are made.",
+    passages: [
       {
         id: "guidelines",
+        source: "Official Guidelines",
+        heading: "",
+        text: "You can resubmit returned projects once fixes are made.",
         programId: "prog-grounded",
-        supportsClaims: ["You can resubmit returned projects once fixes are made."],
+        kind: "source",
       },
     ],
   });
+  answer.getAnswerOrChat = answer.getAnswerOrChatStream = async () => {
+    return {
+      source: "Official Guidelines",
+      answer: "You can resubmit returned projects once fixes are made. [E1]",
+    };
+  };
+  answer.verifyGrounding = async (claims) => {
+    return {
+      verdict: "supported",
+      coverage: true,
+      claims: (claims as Array<{ claim: string; evidenceIds: string[] }>).map((claim) => ({
+        ...claim,
+        supported: true,
+      })),
+    };
+  };
 
   const prog = {
     id: "prog-grounded",
@@ -353,6 +364,8 @@ test("grounded answer and escalation are mutually exclusive (grounded -> no esca
   };
   db.saveProgram(prog);
   db.claimProgramChannel({ programId: prog.id, channelId: prog.helpChannel, kind: "help" });
+  const savedProgramsJson = process.env.RIVET_PROGRAMS_JSON;
+  process.env.RIVET_PROGRAMS_JSON = JSON.stringify([prog]);
   programs.invalidate();
 
   try {
@@ -376,7 +389,12 @@ test("grounded answer and escalation are mutually exclusive (grounded -> no esca
   } finally {
     answer.getAnswerOrChatStream = origGetAnswer;
     answer.getAnswerOrChat = origGetAnswerPlain;
+    answer.verifyGrounding = origVerifier;
+    knowledge.getEvidenceContext = origEvidence;
     db.deleteProgram(prog.id);
+    if (savedProgramsJson === undefined) delete process.env.RIVET_PROGRAMS_JSON;
+    else process.env.RIVET_PROGRAMS_JSON = savedProgramsJson;
+    programs.invalidate();
   }
 });
 

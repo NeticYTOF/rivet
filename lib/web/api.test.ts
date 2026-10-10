@@ -684,7 +684,19 @@ test("internalTestQuestion probes retrieval+grounding with no Slack or ticket si
   const origContext = knowledge.getContext;
   const origLookup = lookup.lookupAnswer;
   knowledge.getContext = () => "### Probe Docs\nTest widgets cost five credits.";
-  lookup.lookupAnswer = async () => ({ source: "Probe Docs", answer: "Test widgets cost five credits." });
+  lookup.lookupAnswer = async () => ({
+    source: "Probe Docs",
+    answer: "Test widgets cost five credits.",
+    passageCitations: ["p1"],
+    citationEvidence: [
+      {
+        id: "p1",
+        programId: "dash-probe",
+        source: "Probe Docs",
+        text: "Test widgets cost five credits.",
+      },
+    ],
+  });
   try {
     const res = await api.internalTestQuestion("dash-probe", { question: "how much is a test widget?", role: "help" });
     assert.equal(res.ok, true);

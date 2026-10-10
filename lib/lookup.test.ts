@@ -55,6 +55,37 @@ test("retrievalQuery leaves standalone non-follow-up questions intact", () => {
   assert.equal(result, standalone);
 });
 
+test("answerOrChat uses a preceding answered question for retrieval, not the answer prompt", async () => {
+  const knowledge = require("./knowledge");
+  const answer = require("./answer");
+  const original = { evidence: knowledge.getEvidenceContext, answer: answer.getAnswerOrChat };
+  let retrievalQuery = "";
+  let answerQuestion = "";
+  const contextPrompt =
+    "Previous conversation:\nuser: Can I use AI in my project?\nassistant: The program has an AI policy.\nuser: what about hardware?";
+  knowledge.getEvidenceContext = (query: string) => {
+    retrievalQuery = query;
+    return { passages: [] };
+  };
+  answer.getAnswerOrChat = async (question: string) => {
+    answerQuestion = question;
+    return { answer: "", source: null };
+  };
+  try {
+    await lookup.answerOrChat("what about hardware?", contextPrompt, {
+      program: { id: "acme", name: "Acme", sharedSources: false, sources: [] },
+      previousQuestion: "Can I use AI in my project?",
+      skipCache: true,
+    });
+    assert.match(retrievalQuery, /Can I use AI in my project\?/);
+    assert.match(retrievalQuery, /what about hardware\?/);
+    assert.equal(answerQuestion, "what about hardware?");
+  } finally {
+    knowledge.getEvidenceContext = original.evidence;
+    answer.getAnswerOrChat = original.answer;
+  }
+});
+
 test("stale dynamic sources cannot authorize an exact answer", () => {
   const knowledge = require("./knowledge");
   const original = knowledge.sourceEligibility;
@@ -215,6 +246,198 @@ test("numericClaimsGrounded rejects invented digit-bearing claims and allows one
   assert.equal(lookup.numericClaimsGrounded("80% chance", ""), true, "no corpus supplied is a no-op, not a reject");
 });
 
+test("inline citations resolve to same-program passages and reject claims the evidence judge rejects", async () => {
+  const knowledge = require("./knowledge");
+  const answer = require("./answer");
+  const original = knowledge.sourceEligibility;
+  const originalVerify = answer.verifyGrounding;
+  knowledge.sourceEligibility = () => ({ exactClaimsAllowed: true, authority: "static" });
+  answer.verifyGrounding = async (claims: Array<{ claim: string; evidenceIds: string[] }>) => ({
+    ok: true,
+    verdict: claims.some(({ claim }) => /Track XP is capped/i.test(claim)) ? "unsupported" : "supported",
+    coverage: true,
+    errors: [],
+    claims: claims.map((claim) => ({ ...claim, supported: !/Track XP is capped/i.test(claim.claim) })),
+  });
+  const program = {
+    id: "citing-acme",
+    sharedSources: false,
+    sources: [{ name: "Program rules", type: "markdown", siteUrl: "https://example.org/rules" }],
+  };
+  const passages = [
+    {
+      id: "passage-1",
+      programId: "citing-acme",
+      kind: "source",
+      source: "Program rules",
+      heading: "Track XP",
+      text: "Track XP is permanent and cannot be spent.",
+    },
+  ];
+  try {
+    const partial = await lookup.applyPassageCitations(
+      {
+        source: "Program rules",
+        answer: "Track XP is permanent. [E1]",
+        unresolved: ["whether it can be spent"],
+      },
+      passages,
+      program,
+    );
+    assert.match(partial.answer, /<https:\/\/example\.org\/rules\|Program rules — Track XP>/);
+    assert.match(partial.answer, /couldn't confirm whether it can be spent/);
+    assert.equal(partial.source, "Program rules");
+
+    assert.equal(
+      await lookup.applyPassageCitations(
+        {
+          source: "Program rules",
+          answer: "You can spend 40 points [E1].",
+        },
+        passages,
+        program,
+      ),
+      null,
+    );
+    assert.equal(
+      await lookup.applyPassageCitations(
+        {
+          source: "Program rules",
+          answer: "Track XP is capped at 40% [E1].",
+        },
+        [{ ...passages[0], text: "AI use is capped at 40% of code." }],
+        program,
+      ),
+      null,
+    );
+    assert.equal(
+      await lookup.applyPassageCitations(
+        {
+          source: "Program rules",
+          answer: "Track XP is permanent [E1].",
+        },
+        [{ ...passages[0], programId: "another-program" }],
+        program,
+      ),
+      null,
+    );
+  } finally {
+    knowledge.sourceEligibility = original;
+    answer.verifyGrounding = originalVerify;
+  }
+});
+
+test("uncited claims get verifier-selected passage IDs and compound omissions fail closed", async () => {
+  const knowledge = require("./knowledge");
+  const answer = require("./answer");
+  const original = { eligibility: knowledge.sourceEligibility, verify: answer.verifyGrounding };
+  knowledge.sourceEligibility = () => ({ exactClaimsAllowed: true, authority: "static" });
+  let coverageRequest: unknown;
+  const prog = { id: "coverage-acme", sharedSources: false, sources: [] };
+  const passages = [
+    {
+      id: "timeline-1",
+      programId: "coverage-acme",
+      kind: "generated",
+      source: "Program timeline",
+      heading: "Dates",
+      text: "Applications close on June 1. Results arrive on July 1.",
+    },
+  ];
+  try {
+    answer.verifyGrounding = async (
+      claims: Array<{ claim: string; evidenceIds: string[] }>,
+      _evidence: unknown,
+      _program: unknown,
+      _channel: unknown,
+      options: unknown,
+    ) => {
+      coverageRequest = (options as { requestCoverage?: unknown }).requestCoverage;
+      return {
+        ok: true,
+        verdict: "supported",
+        coverage: true,
+        errors: [],
+        claims: claims.map(({ claim }) => ({ claim, supported: true, evidenceIds: ["timeline-1"] })),
+      };
+    };
+    const result = await lookup.applyPassageCitations(
+      { source: "Program timeline", answer: "Applications close June 1." },
+      passages,
+      prog,
+      "When do applications close and when do results arrive?",
+      "When is the program deadline?",
+    );
+    assert.match(result.answer, /Program timeline — Dates/);
+    assert.deepEqual(coverageRequest, {
+      question: "When do applications close and when do results arrive?",
+      contextQuestion: "When is the program deadline?",
+      unresolved: [],
+    });
+    answer.verifyGrounding = async (claims: Array<{ claim: string; evidenceIds: string[] }>) => ({
+      ok: true,
+      verdict: "supported",
+      coverage: false,
+      errors: [],
+      claims: claims.map(({ claim }) => ({ claim, supported: true, evidenceIds: ["timeline-1"] })),
+    });
+    assert.equal(
+      await lookup.applyPassageCitations(
+        { source: "Program timeline", answer: "Applications close June 1.", unresolved: [] },
+        passages,
+        prog,
+        "When do applications close and when do results arrive?",
+      ),
+      null,
+    );
+  } finally {
+    knowledge.sourceEligibility = original.eligibility;
+    answer.verifyGrounding = original.verify;
+  }
+});
+
+test("partial answers keep verified claims and replace unsupported requested parts with an honest decline", async () => {
+  const answer = require("./answer");
+  const originalVerify = answer.verifyGrounding;
+  answer.verifyGrounding = async (claims: Array<{ claim: string; evidenceIds: string[] }>) => ({
+    ok: true,
+    verdict: "unsupported",
+    coverage: true,
+    errors: [],
+    claims: claims.map(({ claim, evidenceIds }) => ({
+      claim,
+      supported: /netic built rivet/i.test(claim),
+      evidenceIds: /netic built rivet/i.test(claim) ? ["identity-1"] : evidenceIds,
+    })),
+  });
+  try {
+    const result = await lookup.applyPassageCitations(
+      {
+        source: "About Rivet",
+        answer: "Netic built Rivet. [E1]\nYour unreviewed project is approved.",
+        unresolved: ["whether your unreviewed project is approved"],
+      },
+      [
+        {
+          id: "identity-1",
+          programId: "partial-program",
+          kind: "generated",
+          source: "About Rivet",
+          text: "Netic built Rivet.",
+        },
+      ],
+      { id: "partial-program", sharedSources: false, sources: [] },
+      "Who built Rivet, and is my unreviewed project approved?",
+    );
+    assert.match(result.answer, /Netic built Rivet/);
+    assert.match(result.answer, /couldn't confirm whether your unreviewed project is approved/);
+    assert.doesNotMatch(result.answer, /Your unreviewed project is approved\./);
+    assert.deepEqual(result.passageCitations, ["identity-1"]);
+  } finally {
+    answer.verifyGrounding = originalVerify;
+  }
+});
+
 function ownedFresh() {
   const knowledge = require("./knowledge");
   const original = knowledge.sourceEligibility;
@@ -278,16 +501,16 @@ test("deterministic dispatch reaches validator before retrieval", async () => {
   const answer = require("./answer");
   const orig = {
     val: validator.validateRepository,
-    ctx: knowledge.getContext,
+    ctx: knowledge.getEvidenceContext,
     ans: answer.getAnswerOrChat,
   };
   validator.validateRepository = async (..._a: unknown[]) => {
     order.push("validator");
     return null;
   };
-  knowledge.getContext = () => {
+  knowledge.getEvidenceContext = () => {
     order.push("retrieval");
-    return "";
+    return { context: "", passages: [] };
   };
   answer.getAnswerOrChat = async () => {
     order.push("answer");
@@ -300,7 +523,7 @@ test("deterministic dispatch reaches validator before retrieval", async () => {
     assert.deepEqual(order, ["validator", "retrieval", "answer"]);
   } finally {
     validator.validateRepository = orig.val;
-    knowledge.getContext = orig.ctx;
+    knowledge.getEvidenceContext = orig.ctx;
     answer.getAnswerOrChat = orig.ans;
   }
 });
@@ -311,14 +534,14 @@ test("Firecrawl web fires only inside answerOrChat with allowWebSearch", async (
   const answer = require("./answer");
   let webCalls = 0;
   const origSearch = firecrawl.searchWeb;
-  const origCtx = knowledge.getContext;
+  const origCtx = knowledge.getEvidenceContext;
   const origChat = answer.getAnswerOrChat;
   const origGrounded = answer.getGroundedAnswer;
   firecrawl.searchWeb = async () => {
     webCalls += 1;
     return [];
   };
-  knowledge.getContext = () => "";
+  knowledge.getEvidenceContext = () => ({ context: "", passages: [] });
   answer.getAnswerOrChat = async () => ({ source: null, answer: "" });
   answer.getGroundedAnswer = async () => null;
   try {
@@ -330,7 +553,7 @@ test("Firecrawl web fires only inside answerOrChat with allowWebSearch", async (
     assert.equal(webCalls, 1, "lookupAnswer (docs-only path) never touches the web");
   } finally {
     firecrawl.searchWeb = origSearch;
-    knowledge.getContext = origCtx;
+    knowledge.getEvidenceContext = origCtx;
     answer.getAnswerOrChat = origChat;
     answer.getGroundedAnswer = origGrounded;
   }
@@ -350,24 +573,44 @@ test("cache key includes the program (no cross-program leakage)", () => {
 test("an end-date question reaches retrieval and the answer model, not a canned reply", async () => {
   const knowledge = require("./knowledge");
   const answer = require("./answer");
-  const orig = { ctx: knowledge.getContext, ans: answer.getAnswerOrChat };
+  const orig = { ctx: knowledge.getEvidenceContext, ans: answer.getAnswerOrChat, verify: answer.verifyGrounding };
   const prog = { id: "enddate-prog", name: "EndDate", milestones: [], sharedSources: false };
   const seen: string[] = [];
-  knowledge.getContext = (_q: string) => {
+  knowledge.getEvidenceContext = (_q: string) => {
     seen.push("retrieval");
-    return "Acme's current stated final end date is January 1, 2027.";
+    return {
+      context: "",
+      passages: [
+        {
+          id: "evidence-1",
+          programId: "enddate-prog",
+          kind: "generated",
+          source: "EndDate facts",
+          heading: "Timeline",
+          text: "The final end date is January 1, 2027.",
+        },
+      ],
+    };
   };
   answer.getAnswerOrChat = async () => {
     seen.push("answer");
-    return { answer: "January 1, 2027.", source: "Acme Rivet Knowledge Base" };
+    return { answer: "The final end date is January 1, 2027 [E1].", source: "EndDate facts" };
   };
+  answer.verifyGrounding = async (claims: Array<{ claim: string; evidenceIds: string[] }>) => ({
+    ok: true,
+    verdict: "supported",
+    coverage: true,
+    errors: [],
+    claims: claims.map((claim) => ({ ...claim, supported: true })),
+  });
   try {
     const result = await lookup.answerOrChat("when does it end?", "", { program: prog, skipCache: true });
     assert.deepEqual(seen, ["retrieval", "answer"]);
     assert.doesNotMatch(result.answer, /4 months|No official/);
   } finally {
-    knowledge.getContext = orig.ctx;
+    knowledge.getEvidenceContext = orig.ctx;
     answer.getAnswerOrChat = orig.ans;
+    answer.verifyGrounding = orig.verify;
   }
 });
 export {};

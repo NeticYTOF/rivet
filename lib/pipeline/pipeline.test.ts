@@ -30,6 +30,7 @@ const tickets = require("../tickets");
 const context = require("../context");
 const link = require("../link");
 const respond = require("../respond");
+const realSeedFromSlack = context.seedFromSlack;
 
 type TestRecord = Record<string, unknown>;
 type TestMessage = TestRecord & { text?: string; ts?: string };
@@ -39,6 +40,7 @@ type SendArgs = {
   channel: string;
   text: string;
   addressed?: boolean;
+  userId?: string;
   threadTs?: string | null;
   messageTs?: string | null;
   seedClient?: unknown;
@@ -78,15 +80,25 @@ const JEV: Record<string, { action: string; intent: string }> = {
   },
 };
 
+function groundedFixture(answer: string, source: string, programId: string | undefined) {
+  const id = "fixture-passage";
+  return {
+    answer,
+    source,
+    passageCitations: [id],
+    citationEvidence: [{ id, programId: programId || "acme", source, text: answer }],
+  };
+}
+
 function fakeAnswer(question: string, program: { id?: string } | null | undefined) {
   const q = question.toLowerCase();
   if (q.includes("restoration energy") && program?.id === "acme") {
-    return { answer: "Restoration Energy is what you earn by restoring pixels.", source: "Acme Docs" };
+    return groundedFixture("Restoration Energy is what you earn by restoring pixels.", "Acme Docs", program.id);
   }
   if (q === "what is acme?" && program?.id === "acme")
-    return { answer: "Acme is a YSWS for pixel art games.", source: "Acme Docs" };
+    return groundedFixture("Acme is a YSWS for pixel art games.", "Acme Docs", program.id);
   if (q.includes("resubmit") && program?.id === "acme")
-    return { answer: "Fix the notes and resubmit from your dashboard.", source: "Acme Docs" };
+    return groundedFixture("Fix the notes and resubmit from your dashboard.", "Acme Docs", program.id);
   if (q.includes("pixorpheus")) return { answer: "Me, obviously. Pixorpheus can swim.", source: "NONE" };
   if (q.includes("cookie")) return { answer: "Cream butter and sugar, add chips, bake at 180C.", source: "NONE" };
   return { answer: null, source: null, unclear: true };
@@ -206,6 +218,7 @@ async function send({
   channel,
   text,
   addressed = false,
+  userId,
   threadTs = null,
   messageTs = null,
   seedClient = null,
@@ -217,7 +230,7 @@ async function send({
     channel,
     threadTs: threadTs || ts,
     messageTs: ts,
-    userId: `U_REQ_${seq}`,
+    userId: userId || `U_REQ_${seq}`,
     question: text,
     mode: addressed ? respond.ALWAYS : respond.HELP_ONLY,
     addressed,
@@ -269,6 +282,146 @@ test("main ambient: unsupported shipping question declines without inventing cov
   expect(postedText()).not.toMatch(/\b(shipp?ing|covered|not covered)\b/i);
 });
 
+test("a targeted clarification continues for its requester and ignores another speaker", async () => {
+  const originalQuestion = "how many points do I need?";
+  const threadTs = "clarification-thread";
+  stub(jevDecision, "evaluateSupportDecision", async (args: DecisionArgs) => {
+    jevCalls.push(args);
+    return args.message === "Bolts" || args.message === "Track XP"
+      ? { action: "silence", intent: "human_conversation" }
+      : { action: "engage", intent: "direct_program_question" };
+  });
+  stub(lookup, "answerOrChat", async (question: string, _ctx: string, opts: { program?: { id?: string } }) => {
+    answerCalls.push({ question, program: opts.program?.id });
+    return question === originalQuestion
+      ? groundedFixture("Do you mean Bolts or Track XP?", "Acme Docs", opts.program?.id)
+      : groundedFixture("Track XP records progress for each track.", "Acme Docs", opts.program?.id);
+  });
+
+  expect(await send({ channel: "C_ACME_MAIN", text: originalQuestion, userId: "U_REQUESTER", threadTs })).toBe(true);
+  expect(postedText()).toContain("Quick clarification: Do you mean Bolts or Track XP?");
+  expect(await send({ channel: "C_ACME_MAIN", text: "Track XP", userId: "U_REQUESTER", threadTs })).toBe(true);
+  expect(answerCalls[1].question).toContain(originalQuestion);
+  expect(answerCalls[1].question).toContain("Clarification: Track XP");
+  expect(postedText()).toContain("Track XP records progress");
+
+  const interloperThread = "clarification-interloper";
+  expect(
+    await send({ channel: "C_ACME_MAIN", text: originalQuestion, userId: "U_REQUESTER", threadTs: interloperThread }),
+  ).toBe(true);
+  expect(await send({ channel: "C_ACME_MAIN", text: "Track XP", userId: "U_OTHER", threadTs: interloperThread })).toBe(
+    false,
+  );
+  expect(
+    await send({ channel: "C_ACME_MAIN", text: "Track XP", userId: "U_REQUESTER", threadTs: interloperThread }),
+  ).toBe(true);
+  expect(answerCalls).toHaveLength(4);
+  expect(answerCalls[3].question).toContain("Clarification: Track XP");
+});
+
+test("a clarification is asked once when the requester cannot choose", async () => {
+  const threadTs = "clarification-once";
+  stub(jevDecision, "evaluateSupportDecision", async () => ({
+    action: "engage",
+    intent: "direct_program_question",
+  }));
+  stub(lookup, "answerOrChat", async (_question: string, _ctx: string, opts: { program?: { id?: string } }) =>
+    groundedFixture("Do you mean Bolts or Track XP?", "Acme Docs", opts.program?.id),
+  );
+
+  expect(await send({ channel: "C_ACME_MAIN", text: "how many points?", userId: "U_REQUESTER", threadTs })).toBe(true);
+  expect(await send({ channel: "C_ACME_MAIN", text: "I'm not sure", userId: "U_REQUESTER", threadTs })).toBe(true);
+  expect(postedText().match(/Quick clarification:/g)).toHaveLength(1);
+  expect(postedText()).toContain("I couldn't verify that from the Acme docs");
+});
+
+test("Loadout points ambiguity names Bolts and Track XP", async () => {
+  configure({ acme: { id: "loadout", name: "Loadout" } });
+  stub(jevDecision, "evaluateSupportDecision", async () => ({
+    action: "engage",
+    intent: "direct_program_question",
+  }));
+  stub(lookup, "answerOrChat", async () => ({ answer: "", source: null, unclear: true }));
+
+  expect(await send({ channel: "C_ACME_MAIN", text: "how many points do I need?", userId: "U_REQUESTER" })).toBe(true);
+  expect(postedText()).toContain("Bolts (spendable currency) or Track XP (permanent progress)");
+  expect(handOffs).toHaveLength(0);
+});
+
+test("a clarification survives reseeding the thread from Slack", async () => {
+  stub(context, "seedFromSlack", realSeedFromSlack);
+  const originalQuestion = "how many points do I need?";
+  const seedClient = client();
+  seedClient.conversations.replies = async () => ({
+    messages: [
+      { user: "U_REQUESTER", text: originalQuestion, ts: "10.1" },
+      { bot_id: "B_RIVET", text: "Quick clarification: Do you mean Bolts or Track XP?\n\nLoadout", ts: "10.2" },
+    ],
+  });
+  stub(jevDecision, "evaluateSupportDecision", async (args: DecisionArgs) => {
+    jevCalls.push(args);
+    return { action: "engage", intent: "direct_program_question" };
+  });
+  stub(lookup, "answerOrChat", async (question: string, _ctx: string, opts: { program?: { id?: string } }) => {
+    answerCalls.push({ question, program: opts.program?.id });
+    return groundedFixture("Track XP records progress.", "Acme Docs", opts.program?.id);
+  });
+
+  expect(
+    await send({
+      channel: "C_ACME_MAIN",
+      text: "Track XP",
+      userId: "U_REQUESTER",
+      threadTs: "clarification-reseeded",
+      messageTs: "10.3",
+      seedClient,
+    }),
+  ).toBe(true);
+  expect(answerCalls[0].question).toContain(originalQuestion);
+  expect(answerCalls[0].question).toContain("Clarification: Track XP");
+});
+
+test("subjectless policy follow-up carries only the same requester's preceding answered question", async () => {
+  const retrievalQuestions: Array<string | null> = [];
+  stub(jevDecision, "evaluateSupportDecision", async () => ({
+    action: "engage",
+    intent: "direct_program_question",
+  }));
+  stub(
+    lookup,
+    "answerOrChat",
+    async (_question: string, _ctx: string, opts: { previousQuestion?: string | null; program?: { id?: string } }) => {
+      retrievalQuestions.push(opts.previousQuestion || null);
+      return groundedFixture("The policy applies to hardware too.", "Acme Docs", opts.program?.id);
+    },
+  );
+
+  context.addToThread("subject-followup", "user", "Can I use AI in my project?", "U1", "C_ACME_MAIN");
+  context.addToThread("subject-followup", "assistant", "The program has an AI policy.", null, "C_ACME_MAIN");
+  expect(
+    await send({ channel: "C_ACME_MAIN", text: "what about hardware?", userId: "U1", threadTs: "subject-followup" }),
+  ).toBe(true);
+
+  context.addToThread("unrelated-followup", "user", "What is the ticket policy?", "U2", "C_ACME_MAIN");
+  context.addToThread(
+    "unrelated-followup",
+    "assistant",
+    "Tickets are handled in the help channel.",
+    null,
+    "C_ACME_MAIN",
+  );
+  expect(
+    await send({
+      channel: "C_ACME_MAIN",
+      text: "what about hardware?",
+      userId: "U1",
+      threadTs: "unrelated-followup",
+    }),
+  ).toBe(true);
+
+  expect(retrievalQuestions).toEqual(["Can I use AI in my project?", null]);
+});
+
 test("main ambient: exact payout is never fabricated", async () => {
   await send({ channel: "C_ACME_MAIN", text: "what is my exact payout amount right now?" });
   expect(postedText()).not.toMatch(/\d/);
@@ -294,7 +447,7 @@ test("main ambient: 'how do i do this' with a clear thread referent retrieves an
   stub(lookup, "answerOrChat", async (question: string, ctx: string, opts: { program?: { id?: string } }) => {
     answerCalls.push({ question, program: opts.program?.id });
     return /restoration energy/i.test(ctx)
-      ? { answer: "Restore pixels in the editor to earn it.", source: "Acme Docs" }
+      ? groundedFixture("Restore pixels in the editor to earn it.", "Acme Docs", opts.program?.id)
       : { unclear: true };
   });
   context.addToThread("9000.000", "user", "what is restoration energy?", "U1", "C_ACME_MAIN");

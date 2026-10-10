@@ -6,6 +6,8 @@ interface ThreadMessage {
   role: "user" | "assistant";
   content: string;
   user_id: string | null;
+  channel: string | null;
+  workspace_id: string | null;
 }
 interface SlackMessage {
   ts?: string;
@@ -44,10 +46,11 @@ function addToThread(
   content: string,
   userId: string | null = null,
   channel: string | null = null,
+  workspaceId: string | null = null,
 ) {
   if (!threadTs) return;
   const rows = threadRows(threadTs);
-  rows.push({ role, content, user_id: userId });
+  rows.push({ role, content, user_id: userId, channel, workspace_id: workspaceId });
   if (rows.length > MAX_CONTEXT_MESSAGES * 3) rows.splice(0, rows.length - MAX_CONTEXT_MESSAGES * 3);
   transientThreads.set(threadTs, rows);
   db.touchThread(threadTs, channel, { rivetSpoke: role === "assistant" });
@@ -75,7 +78,10 @@ function selectContextMessages(messages: ThreadMessage[], currentQuestion: strin
     currentQuestion && lastMessage?.role === "user" && lastMessage.content === currentQuestion;
   const candidates =
     currentQuestion && !questionAlreadyStored
-      ? [...messages, { role: "user" as const, content: currentQuestion, user_id: null }]
+      ? [
+          ...messages,
+          { role: "user" as const, content: currentQuestion, user_id: null, channel: null, workspace_id: null },
+        ]
       : messages;
   if (candidates.length <= MAX_CONTEXT_MESSAGES) return candidates;
 
@@ -150,6 +156,9 @@ function getThreadMessages(threadTs: string, limit = 8) {
     .map((message) => ({
       text: message.content,
       speaker: message.role === "assistant" ? "rivet" : "human",
+      userId: message.user_id,
+      channel: message.channel,
+      workspaceId: message.workspace_id,
     }));
 }
 
@@ -174,6 +183,7 @@ function seedFromSlack(
   threadTs: string,
   botUserId: string,
   currentTs: string | null = null,
+  workspaceId: string | null = null,
 ): Promise<void> {
   const inFlight = seedingThreads.get(threadTs);
   if (inFlight) return inFlight;
@@ -188,7 +198,7 @@ function seedFromSlack(
         if (currentTs && m.ts === currentTs) continue;
         const text = (m.text || "").trim();
         if (!text) continue;
-        addToThread(threadTs, roleForMessage(m, botUserId), text, m.user || null, channel);
+        addToThread(threadTs, roleForMessage(m, botUserId), text, m.user || null, channel, workspaceId);
       }
       db.touchThread(threadTs, channel, { seeded: true });
       log.debug("context", `seeded thread ${threadTs} with ${messages.length} messages`);

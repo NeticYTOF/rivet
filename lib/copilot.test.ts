@@ -149,11 +149,25 @@ test("improveReply preserves facts and surfaces token changes", async () => {
 
 test("draftReply reports grounding honestly and never sends", async () => {
   const real = lookup.answerOrChat;
-  lookup.answerOrChat = async () => ({ source: "CP Highway Docs", answer: "Yes — allowed." });
+  lookup.answerOrChat = async () => ({
+    source: "CP Highway Docs",
+    answer: "Yes — allowed.",
+    passageCitations: ["p1"],
+    citationEvidence: [{ id: "p1", programId: "cp-hwy", source: "CP Highway Docs", text: "Yes — allowed." }],
+  });
   try {
     const res = await copilot.draftReply({ program: { id: "cp-hwy", name: "Highway" }, question: "pcbway?" });
     assert.equal(res.grounded, true);
     assert.equal(res.draft, "Yes — allowed.");
+
+    lookup.answerOrChat = async () => ({
+      source: "CP Highway Docs",
+      answer: "Yes — allowed.",
+      passageCitations: ["p1"],
+      citationEvidence: [{ id: "p1", programId: "cp-other", source: "Other Docs", text: "Yes — allowed." }],
+    });
+    const foreign = await copilot.draftReply({ program: { id: "cp-hwy", name: "Highway" }, question: "pcbway?" });
+    assert.equal(foreign.grounded, false, "passages from another program cannot ground a copilot draft");
   } finally {
     lookup.answerOrChat = real;
   }
@@ -217,7 +231,12 @@ test("copilot never sends — read-only helper surface", async () => {
 
   const before = db.handle().query("SELECT COUNT(*) AS n FROM tickets").get().n;
   const real = lookup.answerOrChat;
-  lookup.answerOrChat = async () => ({ source: "CP Highway Docs", answer: "draft text" });
+  lookup.answerOrChat = async () => ({
+    source: "CP Highway Docs",
+    answer: "draft text",
+    passageCitations: ["p1"],
+    citationEvidence: [{ id: "p1", programId: "cp-hwy", source: "CP Highway Docs", text: "draft text" }],
+  });
   try {
     const res = await copilot.draftReply({ program: { id: "cp-hwy", name: "Highway" }, question: "pcbway?" });
     assert.equal(res.draft, "draft text");

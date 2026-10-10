@@ -13,6 +13,7 @@ const respond = require("./respond") as unknown as {
 const answer = require("./answer") as unknown as {
   getAnswerOrChatStream: (...args: unknown[]) => Promise<unknown>;
   getAnswerOrChat: (...args: unknown[]) => Promise<unknown>;
+  verifyGrounding: (...args: unknown[]) => Promise<unknown>;
 };
 const intent = require("./intent") as unknown as {
   HELP_NEEDED: string;
@@ -66,6 +67,13 @@ const FLEET = JSON.stringify([
     channels: [HELP],
     organizerChannel: ORG,
     links: { docs: "https://example.test/docs" },
+    sources: [
+      {
+        name: "Docs",
+        type: "text",
+        content: "Repository submissions must be public. You can resubmit returned projects once fixes are made. ok",
+      },
+    ],
   },
   {
     id: "st-acme",
@@ -79,6 +87,7 @@ const FLEET = JSON.stringify([
 let savedBlob;
 const realStream = answer.getAnswerOrChatStream;
 const realAnswer = answer.getAnswerOrChat;
+const realVerifier = answer.verifyGrounding;
 const realIntent = intent.classifyIntent;
 
 before(() => {
@@ -91,11 +100,26 @@ beforeEach(() => {
   process.env.RIVET_PROGRAMS_JSON = FLEET;
   programs.invalidate();
   intent.classifyIntent = async () => intent.HELP_NEEDED;
+  answer.verifyGrounding = async (...args: unknown[]) => {
+    const claims = args[0] as Array<{ claim: string; evidenceIds: string[] }>;
+    const evidence = args[1] as Array<{ id: string }>;
+    return {
+      verdict: evidence.length ? "supported" : "unsupported",
+      coverage: true,
+      errors: [],
+      claims: claims.map((claim) => ({
+        ...claim,
+        supported: evidence.length > 0,
+        evidenceIds: claim.evidenceIds.length ? claim.evidenceIds : evidence[0] ? [evidence[0].id] : [],
+      })),
+    };
+  };
 });
 
 afterEach(() => {
   answer.getAnswerOrChatStream = realStream;
   answer.getAnswerOrChat = realAnswer;
+  answer.verifyGrounding = realVerifier;
   intent.classifyIntent = realIntent;
   if (savedBlob === undefined) delete process.env.RIVET_PROGRAMS_JSON;
   else process.env.RIVET_PROGRAMS_JSON = savedBlob;
@@ -123,7 +147,12 @@ async function ask(
 test("knows the answer: ticket opens, answer posts in the same thread, ticket stays OPEN", async () => {
   answer.getAnswerOrChat = answer.getAnswerOrChatStream = async () => ({
     source: "Docs",
-    answer: "yes, as long as it's public",
+    answer: "yes, as long as it's public [E1]",
+  });
+  answer.verifyGrounding = async (claims) => ({
+    verdict: "supported",
+    coverage: true,
+    claims: (claims as Array<{ claim: string; evidenceIds: string[] }>).map((claim) => ({ ...claim, supported: true })),
   });
   const client = clientSpy();
   await ask(client, "t-knows", "does my repo need to be public?");
@@ -187,7 +216,12 @@ test("a reply inside an existing ticket thread does not open a second ticket", a
 });
 
 test("resolve is idempotent: two clicks, one transition, one confirmation, no stale button", async () => {
-  answer.getAnswerOrChat = answer.getAnswerOrChatStream = async () => ({ source: "Docs", answer: "ok" });
+  answer.getAnswerOrChat = answer.getAnswerOrChatStream = async () => ({ source: "Docs", answer: "ok [E1]" });
+  answer.verifyGrounding = async (claims) => ({
+    verdict: "supported",
+    coverage: true,
+    claims: (claims as Array<{ claim: string; evidenceIds: string[] }>).map((claim) => ({ ...claim, supported: true })),
+  });
   const client = clientSpy();
   await ask(client, "t-res", "a real question", { userId: "U-res" });
   const ticket = db.getTicketByThreadTs("t-res");

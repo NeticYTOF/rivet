@@ -13,7 +13,7 @@ what it can't answer to human helpers, and learns from resolutions.
 - Local: `C:\Users\aarav\Projects\Rivet`
 - Serving `#loadout` (main/ambient), `#loadout-help` (help/tickets),
   `#loadout-development` (weekly report + `@`-mentions only)
-- Suite: **99/99 core + 19/19 wizard green**, typecheck + prettier clean
+- Suite: **100/100 core + 19/19 wizard green**, typecheck + prettier clean
 - Model: answers `deepseek/deepseek-v4-flash-0731`, intent
   `openai/gpt-4.1-nano`, both via Hack Club AI (`HCAI_API_KEY`)
 
@@ -63,6 +63,11 @@ Casing: `Loadout`, `Hack Club`, `YSWS` — never `LOADOUT`/`Cores`/`yswe`.
 
 ## Recent work (newest first)
 
+- Answers: verify each factual claim against same-program passages, select
+  passage IDs for uncited claims, preserve grounded parts of compound answers,
+  and state unresolved parts. Follow-up retrieval uses thread context while
+  checking coverage against the current question; clarification keeps the
+  requester's reply.
 - Voice/branding: `:yuh:` retired (was every reply's ending); 1–3 emoji
   matched to mood, anywhere they fit. Bot posts as `Rivet`, no signature.
   Makers grounded (identity + FAQ + pinned rule).
