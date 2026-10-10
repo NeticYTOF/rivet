@@ -396,7 +396,7 @@ test("uncited claims get verifier-selected passage IDs and compound omissions fa
   }
 });
 
-test("partial answers keep verified claims and replace unsupported requested parts with an honest decline", async () => {
+test("partial answers extract an explicit uncertainty clause and decline only that question part", async () => {
   const answer = require("./answer");
   const originalVerify = answer.verifyGrounding;
   answer.verifyGrounding = async (claims: Array<{ claim: string; evidenceIds: string[] }>) => ({
@@ -406,16 +406,16 @@ test("partial answers keep verified claims and replace unsupported requested par
     errors: [],
     claims: claims.map(({ claim, evidenceIds }) => ({
       claim,
-      supported: /netic built rivet/i.test(claim),
-      evidenceIds: /netic built rivet/i.test(claim) ? ["identity-1"] : evidenceIds,
+      supported: /netic.{0,20}rivet|rivet.{0,20}netic/i.test(claim),
+      evidenceIds: /netic.{0,20}rivet|rivet.{0,20}netic/i.test(claim) ? ["identity-1"] : evidenceIds,
     })),
   });
   try {
     const result = await lookup.applyPassageCitations(
       {
         source: "About Rivet",
-        answer: "Netic built Rivet. [E1]\nYour unreviewed project is approved.",
-        unresolved: ["whether your unreviewed project is approved"],
+        answer:
+          "Rivet was built by Netic :meffmoney: and honestly no clue on approval status — that's not something i can see :thonk: a maintainer in the program would know better",
       },
       [
         {
@@ -427,12 +427,35 @@ test("partial answers keep verified claims and replace unsupported requested par
         },
       ],
       { id: "partial-program", sharedSources: false, sources: [] },
-      "Who built Rivet, and is my unreviewed project approved?",
+      "Who built Rivet, and what is my project's approval status?",
     );
-    assert.match(result.answer, /Netic built Rivet/);
-    assert.match(result.answer, /couldn't confirm whether your unreviewed project is approved/);
-    assert.doesNotMatch(result.answer, /Your unreviewed project is approved\./);
+    assert.match(result.answer, /Rivet was built by Netic/);
+    assert.match(result.answer, /couldn't confirm this part: “what is my project's approval status”/);
+    assert.doesNotMatch(result.answer, /honestly no clue|not something i can see/);
     assert.deepEqual(result.passageCitations, ["identity-1"]);
+
+    const explicitUnresolved = await lookup.applyPassageCitations(
+      {
+        source: "About Rivet",
+        answer:
+          "Rivet was built by Netic :meffmoney: as for your project's approval status, that's not something i can see from here.",
+        unresolved: ["my project's approval status"],
+      },
+      [
+        {
+          id: "identity-1",
+          programId: "partial-program",
+          kind: "generated",
+          source: "About Rivet",
+          text: "Netic built Rivet.",
+        },
+      ],
+      { id: "partial-program", sharedSources: false, sources: [] },
+      "Who built Rivet, and what is my project's approval status?",
+    );
+    assert.match(explicitUnresolved.answer, /Rivet was built by Netic/);
+    assert.match(explicitUnresolved.answer, /couldn't confirm my project's approval status/);
+    assert.doesNotMatch(explicitUnresolved.answer, /that's not something i can see/);
   } finally {
     answer.verifyGrounding = originalVerify;
   }

@@ -201,6 +201,69 @@ function citationLabel(passage: { source: string; heading?: string }, url: strin
   }
 }
 
+function separateExplicitUncertainty(answer: string, question: string) {
+  const parts = question.split(/\s+(?:and|also|as well as)\s+/i).map((part) => part.trim());
+  if (parts.length < 2) return { answer, unresolved: [] as string[] };
+
+  const marker =
+    /\s+(?:(?:and|also|as well as)\s+)?(?:honestly\s+)?(?:as for|no clue|not sure|don't know|do not know|can't see|cannot see|can't confirm|cannot confirm|couldn't confirm|can't tell|cannot tell|can't determine|cannot determine|unable to confirm)\b/i;
+  const match = marker.exec(answer);
+  if (!match || !answer.slice(0, match.index).trim()) return { answer, unresolved: [] as string[] };
+
+  const uncertainty = answer.slice(match.index);
+  if (
+    !/\b(?:no clue|not sure|don't know|do not know|can't see|cannot see|can't confirm|cannot confirm|couldn't confirm|can't tell|cannot tell|can't determine|cannot determine|unable to confirm|not something (?:i|we) can see)\b/i.test(
+      uncertainty,
+    )
+  )
+    return { answer, unresolved: [] as string[] };
+  const uncertaintyTokens = new Set(uncertainty.toLowerCase().match(/[a-z0-9]+/g) || []);
+  const generic = new Set([
+    "what",
+    "when",
+    "where",
+    "how",
+    "who",
+    "why",
+    "is",
+    "are",
+    "was",
+    "were",
+    "do",
+    "does",
+    "did",
+    "my",
+    "your",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "project",
+    "exact",
+    "date",
+    "status",
+  ]);
+  const unresolved = parts
+    .slice(1)
+    .filter((part) =>
+      (part.toLowerCase().match(/[a-z0-9]+/g) || []).some(
+        (token) => token.length > 2 && !generic.has(token) && uncertaintyTokens.has(token),
+      ),
+    );
+  if (!unresolved.length) return { answer, unresolved: [] as string[] };
+
+  const factualAnswer = answer
+    .slice(0, match.index)
+    .trim()
+    .replace(/(?:,|and|also|as well as|—|:)+\s*$/i, "")
+    .trim();
+  return {
+    answer: factualAnswer,
+    unresolved: unresolved.map((part) => `this part: “${part.replace(/[?.!]+$/g, "")}”`),
+  };
+}
+
 async function applyPassageCitations(
   result: AnswerResult | null,
   passages: Array<{
@@ -237,7 +300,9 @@ async function applyPassageCitations(
     aliases.set(`E${index + 1}`, passage.id);
     ids.set(passage.id, `E${index + 1}`);
   }
-  const answerText = String(result.answer || "");
+  const separated = separateExplicitUncertainty(String(result.answer || ""), question);
+  if (!result.unresolved?.length && separated.unresolved.length) result.unresolved = separated.unresolved;
+  const answerText = separated.answer;
   const refs = [...answerText.matchAll(/\[(E\d+)\]/g)];
   for (const match of refs) {
     const alias = match[1];
