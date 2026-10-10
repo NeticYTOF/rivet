@@ -186,6 +186,26 @@ function evidencePrompt(passages: Array<{ id: string; source: string; heading?: 
     .join("\n\n");
 }
 
+function exactFaqAnswer(question: string, passages: Array<{ source: string; text: string }>): AnswerResult | null {
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const expected = normalize(question);
+  if (!expected) return null;
+
+  for (const [index, passage] of passages.entries()) {
+    if (!/faq|frequently asked/i.test(`${passage.source}\n${passage.text.slice(0, 100)}`)) continue;
+    for (const match of passage.text.matchAll(/^\s*\*\*([^*\n]+)\*\*\s+(.+)$/gm)) {
+      if (normalize(match[1]) === expected && match[2].trim()) {
+        return { source: passage.source, answer: `${match[2].trim()} [E${index + 1}]` };
+      }
+    }
+  }
+  return null;
+}
+
 function citationLabel(passage: { source: string; heading?: string }, url: string | null) {
   const label = `${passage.source}${passage.heading ? ` — ${passage.heading}` : ""}`
     .replace(/&/g, "&amp;")
@@ -533,7 +553,8 @@ async function lookupAnswer(
   const query = retrievalQuery(question, contextPrompt, prog);
   const { passages } = knowledge.getEvidenceContext(query, programId);
   const corpus = evidencePrompt(passages);
-  let result = await answer.getGroundedAnswer(question, corpus, contextPrompt, prog, channel, { isPing });
+  let result = exactFaqAnswer(question, passages);
+  if (!result) result = await answer.getGroundedAnswer(question, corpus, contextPrompt, prog, channel, { isPing });
   if (result) {
     result = await applyPassageCitations(result, passages, prog, question);
     result = applyGroundingBoundary(result, prog, question, corpus);
@@ -571,16 +592,19 @@ async function answerOrChat(
     : retrievalQuery(question, contextPrompt, prog);
   const { passages } = knowledge.getEvidenceContext(query, programId);
   const corpus = evidencePrompt(passages);
-  let result =
-    onText && passages.length === 0
-      ? await answer.getAnswerOrChatStream(question, corpus, contextPrompt, {
-          onText,
-          inHelpChannel,
-          program: prog,
-          channel,
-          isPing,
-        })
-      : await answer.getAnswerOrChat(question, corpus, contextPrompt, inHelpChannel, prog, channel, { isPing });
+  let result = exactFaqAnswer(question, passages);
+  if (!result) {
+    result =
+      onText && passages.length === 0
+        ? await answer.getAnswerOrChatStream(question, corpus, contextPrompt, {
+            onText,
+            inHelpChannel,
+            program: prog,
+            channel,
+            isPing,
+          })
+        : await answer.getAnswerOrChat(question, corpus, contextPrompt, inHelpChannel, prog, channel, { isPing });
+  }
 
   if (!result?.source) {
     const direct = dateFallback(question, contextPrompt, prog);
